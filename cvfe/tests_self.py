@@ -140,6 +140,39 @@ def t5_engine(seed=0):
     check("T5c prototype coherence == rho", dev < 1e-9, f"max_dev={dev:.2e}")
 
 
+def t6_log_c0_equivalence(n=64, seed=0):
+    """T6 (B21) _log_c0 与 cls_marginal 内联 log-sum-exp 实现数值等价；
+    且 σ_θ→0 极限 = ρ(cos ψ−1)（delta 先验）。"""
+    rng = np.random.RandomState(seed)
+    rho = rng.uniform(0.1, 40.0, (n,))
+    psi = rng.uniform(-np.pi, np.pi, (n,))
+    for sg in (0.3, 1.05, np.pi):
+        th = np.linspace(-np.pi, np.pi, 128, endpoint=False)
+        pr = E._wrapped_prior(sg, 128)
+        ll = (rho[..., None] * (np.cos(psi[..., None] - th) - 1.0))
+        c0 = (np.exp(ll - ll.max(-1, keepdims=True)) * pr[None, :]).sum(-1)
+        ref = ll.max(-1) + np.log(np.maximum(c0, 1e-300))
+        got = E._log_c0(rho, psi, sg)
+        err = np.abs(got - ref).max()
+        check(f"T6a _log_c0 == inline lse (st={sg:.2f})", err < 1e-8, f"max_err={err:.2e}")
+    got0 = E._log_c0(rho, psi, 1e-3)
+    err0 = np.abs(got0 - rho * (np.cos(psi) - 1.0)).max()
+    check("T6b _log_c0 delta-prior limit", err0 < 1e-6, f"max_err={err0:.2e}")
+
+
+def t7_joint_profile_endpoints(n=48, seed=0):
+    """T7 (B21) 联合轮廓 σ_θ̂：σ_θ=0 → 小；σ_θ=π/3 → 中段。k=5, p=16, ρ=0.3。"""
+    from cvfe import synth as _S
+    rng = np.random.RandomState(seed)
+    mu = _S.make_prototypes(5, 16, 0.3, rng)
+    for st_true, lo, hi in ((0.0, 0.0, 0.15), (np.pi / 3, 0.4, 1.5)):
+        Zs, _, _ = _S.batch_episodes(mu, 5, 5, 4, st_true, 0.5, n, seed=31 + int(st_true * 7))
+        _, aux = E.phasemap_em(Zs, kappa_profile="joint")
+        med = float(np.median(aux["sigma_th"][:, 0]))
+        check(f"T7 joint profile st_hat at σ_θ={st_true:.2f} in [{lo},{hi}]",
+              lo <= med <= hi, f"median={med:.3f}")
+
+
 if __name__ == "__main__":
     print("=== B2 unit tests ===")
     t1_orbital_identity()
@@ -147,6 +180,8 @@ if __name__ == "__main__":
     t3_endpoints()
     t4_align_monotone()
     t5_engine()
+    t6_log_c0_equivalence()
+    t7_joint_profile_endpoints()
     n_fail = sum(1 for _, ok in PASS if not ok)
     print(f"=== {len(PASS) - n_fail}/{len(PASS)} passed ===")
     sys.exit(1 if n_fail else 0)

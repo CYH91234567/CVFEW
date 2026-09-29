@@ -176,6 +176,26 @@ def _wrapped_prior(st_unique, n_grid):
     return _PR_CACHE[key]
 
 
+def _log_c0(rho, psi, st, n_grid=128):
+    """log ∫ exp(ρ·cos(ψ−θ)) pr_{σ_θ}(θ) dθ —— log-sum-exp（ρ 不截断）。
+    rho,psi 同形 (…)；st 标量。与 cls_marginal 内联实现同构（单测锁定等价）。"""
+    th = np.linspace(-np.pi, np.pi, n_grid, endpoint=False)
+    pr = _wrapped_prior(float(st), n_grid)
+    LOGPR = np.where(pr > 0, np.log(np.maximum(pr, 1e-300)), -np.inf)
+    m_best = np.full(rho.shape, -np.inf)
+    for g0 in range(0, n_grid, 32):
+        sl = slice(g0, min(g0 + 32, n_grid))
+        term = rho[..., None] * (np.cos(psi[..., None] - th[sl]) - 1.0) + LOGPR[sl]
+        m_best = np.maximum(m_best, term.max(-1))
+    m_best = np.where(np.isfinite(m_best), m_best, 0.0)                  # 全 -inf 兜底
+    acc = np.zeros(rho.shape)
+    for g0 in range(0, n_grid, 32):
+        sl = slice(g0, min(g0 + 32, n_grid))
+        term = rho[..., None] * (np.cos(psi[..., None] - th[sl]) - 1.0) + LOGPR[sl]
+        acc += np.exp(term - m_best[..., None]).sum(-1)
+    return m_best + np.log(np.maximum(acc, 1e-300))
+
+
 def _gamma_grid(rho, psi, sigma_th, n_grid=256):
     """E步的数值稳定路线：theta 网格求积（周期梯形=谱精度，无相消）。
     gamma = ∫ exp(rho cos(psi-θ)) pr(θ) e^{-iθ} dθ / ∫ exp(rho cos(psi-θ)) pr(θ) dθ
@@ -223,7 +243,8 @@ def _gamma_posterior(rho, psi, sigma_th):
 
 
 def phasemap_em(Zs, sigma_th=None, kappa_meta=None, n_iter=24, tol=1e-7,
-                hetero_weights=False, per_class_kappa=False, kappa_prior=None, seed=0):
+                hetero_weights=False, per_class_kappa=False, kappa_prior=None, seed=0,
+                kappa_profile="joint", profile_delta=None, profile_select="argmax"):
     """PhaseMAP EM。Zs:(E,K,k,p)。
 
     sigma_th: 固定先验宽度（oracle/固定κ模式）；None=episode内估计（k>=2）。
@@ -231,6 +252,10 @@ def phasemap_em(Zs, sigma_th=None, kappa_meta=None, n_iter=24, tol=1e-7,
     hetero_weights: 逐样本精度加权 w_j = 1/sigma_j^2（P3 噪声异方差组件）。
     kappa_prior: (sigma0, w0) 层级收缩——episode估计按伪计数 w0 向 σ₀ 收缩
                  （经验贝叶斯；σ₀ 来自元训练/B1诊断，w0 为先验强度）。
+    kappa_profile: "joint"（默认，B21）：每个 σ_θ 候选固定后重拟合 (μ,σ²)，
+                   比较完整观测对数似然（真 profile likelihood）；
+                   "plug"：旧行为——公共 σ² 点估计下只比较 log ĉ0 项
+                   （低SNR时 σ_θ̂ 过估，保留仅作回归）。
     返回 mu:(E,K,p), aux dict（sigma2_c, sigma_th_c, n_eff_c, iters）。
     """
     E, K, k, p = Zs.shape
@@ -308,25 +333,78 @@ def phasemap_em(Zs, sigma_th=None, kappa_meta=None, n_iter=24, tol=1e-7,
     # ---- sigma_theta 轮廓似然精化（episode 池化；对齐过拟合下比矩估计更稳）----
     if sigma_th is None and k >= 2:
         st_grid = np.array([1e-3, 0.15, 0.3, 0.5, 0.75, 1.05, 1.4, 1.8, 2.2, 2.6, 2.9, np.pi])
-        uth = np.unique(np.round(st, 6))
-        # 当前每类 sigma2 均值作为池化 sigma2
-        s2_pool = sigma2.mean(axis=1)                                        # (E,)
-        ip_f = np.einsum("ekp,ekjp->ekj", mu.conj(), Zs)                     # (E,K,k)
-        rho_f = np.minimum(2.0 * np.abs(ip_f) / np.maximum(s2_pool[:, None, None], 1e-12), 700.0)
-        psi_f = np.angle(ip_f)
-        best_ll = np.full(E, -np.inf)
-        best_st = np.full(E, 1.0)
-        thG = np.linspace(-np.pi, np.pi, 128, endpoint=False)
-        for sg in st_grid:
-            pr = _wrapped_prior(sg, 128)
-            ll = (rho_f[..., None] * (np.cos(psi_f[..., None] - thG) - 1.0))
-            c0 = np.exp(ll).sum(-1) @ pr if False else (np.exp(ll) * pr[None, None, None, :]).sum(-1)
-            # 观测数据对数似然（池化对 sigma2/μ 的公共项跨 σ_θ 不变，只差 θ 积分项）
-            ll_s = np.log(np.maximum(c0, 1e-300)).sum(axis=(1, 2))           # (E,)
-            better = ll_s > best_ll
-            best_ll = np.where(better, ll_s, best_ll)
-            best_st = np.where(better, sg, best_st)
-        st = np.repeat(best_st[:, None], K, axis=1)
+        if kappa_profile == "plug":
+            uth = np.unique(np.round(st, 6))
+            # 当前每类 sigma2 均值作为池化 sigma2
+            s2_pool = sigma2.mean(axis=1)                                    # (E,)
+            ip_f = np.einsum("ekp,ekjp->ekj", mu.conj(), Zs)                 # (E,K,k)
+            rho_f = np.minimum(2.0 * np.abs(ip_f) / np.maximum(s2_pool[:, None, None], 1e-12), 700.0)
+            psi_f = np.angle(ip_f)
+            best_ll = np.full(E, -np.inf)
+            best_st = np.full(E, 1.0)
+            thG = np.linspace(-np.pi, np.pi, 128, endpoint=False)
+            for sg in st_grid:
+                pr = _wrapped_prior(sg, 128)
+                ll = (rho_f[..., None] * (np.cos(psi_f[..., None] - thG) - 1.0))
+                c0 = np.exp(ll).sum(-1) @ pr if False else (np.exp(ll) * pr[None, None, None, :]).sum(-1)
+                # 观测数据对数似然（池化对 sigma2/μ 的公共项跨 σ_θ 不变，只差 θ 积分项）
+                ll_s = np.log(np.maximum(c0, 1e-300)).sum(axis=(1, 2))       # (E,)
+                better = ll_s > best_ll
+                best_ll = np.where(better, ll_s, best_ll)
+                best_st = np.where(better, sg, best_st)
+            st = np.repeat(best_st[:, None], K, axis=1)
+        else:
+            # ---- B21 联合轮廓：每个候选 σ_θ 固定后重拟合 (μ,σ²)，比完整观测 LL ----
+            # LL(σ_θ) = Σ[−p·log σ² − d_orb²/σ² + log ĉ0]，与 cls_marginal 同构。
+            # 旧 plug 版在低SNR时被"大σ_θ→软γ→μ收缩→残差大→ĉ0虚高"的自洽环推高 σ_θ̂；
+            # 每候选用自己的最优 (μ,σ²) 后该环被 ML 标准截断。
+            mu0, s20 = mu, sigma2
+            zs2 = (np.abs(Zs) ** 2).sum(-1)                                  # (E,K,k)
+            ll_mat = np.full((E, len(st_grid)), -np.inf)
+            for gi, sg in enumerate(st_grid):
+                st_c = np.full((E, K), sg)
+                mu_c, s2_c = mu0, s20
+                for _ in range(2):                                           # 固定-σ_θ EM
+                    ip_c = np.einsum("ekp,ekjp->ekj", mu_c.conj(), Zs)
+                    gam_c = _gamma_grid(2.0 * np.abs(ip_c) / s2_c[..., None],
+                                        np.angle(ip_c), st_c[..., None])
+                    mu_c = (gam_c[..., None] * Zs).sum(2) / k
+                    ip_n = np.einsum("ekp,ekjp->ekj", mu_c.conj(), Zs)
+                    res2 = zs2 + (np.abs(mu_c) ** 2).sum(-1)[:, :, None] \
+                        - 2 * np.real(gam_c * ip_n)
+                    s2_c = np.maximum(res2.mean(2) / p, 1e-9)
+                ip_f = np.einsum("ekp,ekjp->ekj", mu_c.conj(), Zs)
+                aip = np.abs(ip_f)
+                rho_f = 2.0 * aip / s2_c[..., None]
+                d_orb2 = zs2 + (np.abs(mu_c) ** 2).sum(-1)[:, :, None] - 2.0 * aip
+                ll_full = (-p * np.log(s2_c)[..., None] - d_orb2 / s2_c[..., None]
+                           + _log_c0(rho_f, np.angle(ip_f), sg))
+                ll_mat[:, gi] = ll_full.sum(axis=(1, 2))                     # (E,)
+            best_ll = ll_mat.max(axis=1)
+            am = ll_mat.argmax(axis=1)
+            if profile_select == "argmax":
+                best_st = st_grid[am]
+            elif profile_select == "min_elig":
+                # 双侧保守（B21-v2）：95% 轮廓集下界。宽相位端 LL 平坦时过度下压。
+                elig = ll_mat >= (best_ll[:, None] - profile_delta)
+                best_st = st_grid[elig.argmax(axis=1)]
+            elif profile_select == "null_first":
+                # 单侧保守（B21-v3）：σ_θ=0 为简约零假设（LRT 不拒绝则取 delta），
+                # 宽相位端保持 argmax——只治"相干 episode 虚假宽度"。
+                ok0 = ll_mat[:, 0] >= (best_ll - profile_delta)
+                best_st = np.where(ok0, st_grid[0], st_grid[am])
+            else:
+                raise ValueError(profile_select)
+            st = np.repeat(best_st[:, None], K, axis=1)
+            for _ in range(2):                                               # 固定-κ 抛光
+                ip_p = np.einsum("ekp,ekjp->ekj", mu.conj(), Zs)
+                gam_p = _gamma_grid(2.0 * np.abs(ip_p) / sigma2[..., None],
+                                    np.angle(ip_p), st[..., None])
+                mu = (gam_p[..., None] * Zs).sum(2) / k
+                ip_n = np.einsum("ekp,ekjp->ekj", mu.conj(), Zs)
+                res2 = zs2 + (np.abs(mu) ** 2).sum(-1)[:, :, None] \
+                    - 2 * np.real(gam_p * ip_n)
+                sigma2 = np.maximum(res2.mean(2) / p, 1e-9)
     # ---- 层级 κ 收缩（经验贝叶斯）：伪计数 w0 向 σ₀ 收缩，再做 3 轮抛光 EM ----
     if kappa_prior is not None and sigma_th is None and k >= 2:
         s0, w0 = kappa_prior
@@ -512,6 +590,11 @@ def run_method(name, Zs, Zq, mu_true=None, kappa_meta=None, sigma_th_oracle=None
         return cls_orbital(Zq, proto_canon(Zs, rule)), {}
     if name.startswith("canonQ_"):                # 支持侧轨道对齐 + 查询侧选截面
         rule = name.split("_", 1)[1]
+        if rule == "ref":                         # 查询侧按支持集二阶矩参考轴规范化
+            v = canon_ref_vec(Zs)
+            mu = proto_canon_ref(Zs)
+            Zqc = canon_apply_ref(Zq, v)
+            return (np.abs(Zqc[:, :, None, :] - mu[:, None, :, :]) ** 2).sum(-1).argmin(-1), {}
         return cls_canon(Zq, proto_orbital(Zs), rule=rule), {}
     if name in ("canon_ref", "canonX_ref"):       # MRA 标准：二阶矩主方向规范化
         v = canon_ref_vec(Zs)
