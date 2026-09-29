@@ -144,12 +144,14 @@ def _gamma_posterior(rho, psi, sigma_th):
 
 
 def phasemap_em(Zs, sigma_th=None, kappa_meta=None, n_iter=24, tol=1e-7,
-                hetero_weights=False, per_class_kappa=False, seed=0):
+                hetero_weights=False, per_class_kappa=False, kappa_prior=None, seed=0):
     """PhaseMAP EM。Zs:(E,K,k,p)。
 
     sigma_th: 固定先验宽度（oracle/固定κ模式）；None=episode内估计（k>=2）。
     kappa_meta: 1-shot 时使用的元先验宽度（k==1 且 sigma_th=None 时生效）。
     hetero_weights: 逐样本精度加权 w_j = 1/sigma_j^2（P3 噪声异方差组件）。
+    kappa_prior: (sigma0, w0) 层级收缩——episode估计按伪计数 w0 向 σ₀ 收缩
+                 （经验贝叶斯；σ₀ 来自元训练/B1诊断，w0 为先验强度）。
     返回 mu:(E,K,p), aux dict（sigma2_c, sigma_th_c, n_eff_c, iters）。
     """
     E, K, k, p = Zs.shape
@@ -242,6 +244,22 @@ def phasemap_em(Zs, sigma_th=None, kappa_meta=None, n_iter=24, tol=1e-7,
             best_ll = np.where(better, ll_s, best_ll)
             best_st = np.where(better, sg, best_st)
         st = np.repeat(best_st[:, None], K, axis=1)
+    # ---- 层级 κ 收缩（经验贝叶斯）：伪计数 w0 向 σ₀ 收缩，再做 3 轮抛光 EM ----
+    if kappa_prior is not None and sigma_th is None and k >= 2:
+        s0, w0 = kappa_prior
+        n_ep = float(K * k)
+        st_pool = st[:, 0]                                   # 池化估计 (E,)
+        st_shrunk = np.sqrt((w0 * s0 ** 2 + n_ep * st_pool ** 2) / (w0 + n_ep))
+        st = np.repeat(np.maximum(st_shrunk, 1e-3)[:, None], K, axis=1)
+        for _ in range(3):                                   # 固定 κ 抛光 μ, σ²
+            ip_p = np.einsum("ekp,ekjp->ekj", mu.conj(), Zs)
+            rho_p = 2 * np.abs(ip_p) / sigma2[..., None]
+            psi_p = np.angle(ip_p)
+            gam_p = _gamma_grid(rho_p, psi_p, st[..., None])
+            mu = (gam_p[..., None] * Zs).sum(axis=2) / k
+            ip_n = np.einsum("ekp,ekjp->ekj", mu.conj(), Zs)
+            res2 = (np.abs(Zs) ** 2).sum(-1) + (np.abs(mu) ** 2).sum(-1)[:, :, None]                 - 2 * np.real(gam_p * ip_n)
+            sigma2 = np.maximum(res2.mean(axis=2) / p, 1e-9)
     n_eff = (w * np.abs(gam) ** 2).sum(axis=2)                              # (E,K)
     aux = {"sigma2": sigma2, "sigma_th": st, "n_eff": np.maximum(n_eff, 1e-6),
            "iters": iters, "gam": gam, "w": w}
