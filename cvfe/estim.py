@@ -287,7 +287,11 @@ def phasemap_em(Zs, sigma_th=None, kappa_meta=None, n_iter=24, tol=1e-7,
                     w.sum((1, 2)), 1e-12)                                  # (E,) 跨类池化
                 rho_bar = (2.0 * np.abs(ip) / sigma2[..., None]).mean((1, 2))
                 n_eff = np.full_like(R1, K * k)
-            R_eps = ive(1, rho_bar) / np.maximum(ive(0, rho_bar), 1e-300)
+            # 防 ive 溢出：ρ 极大时 ive(1,ρ),ive(0,ρ) 均溢出为 inf ⇒ inf/inf=NaN
+            # （学习到的嵌入 σ²~1e-4 时必现）。ρ>300 时 I1/I0 → 1−1/(2ρ)，截断误差 <2e-3。
+            rho_bar_c = np.minimum(np.asarray(rho_bar, dtype=float), 300.0)
+            R_eps = ive(1, rho_bar_c) / np.maximum(ive(0, rho_bar_c), 1e-300)
+            R_eps = np.where(np.isfinite(R_eps), R_eps, 1.0)
             R2_pop = np.maximum((n_eff * R1 ** 2 - 1.0) / np.maximum(n_eff - 1, 1.0), 1e-6)
             R_th = np.clip(np.sqrt(R2_pop) / np.maximum(R_eps, 1e-6), 1e-3, 0.9995)
             st_new = np.sqrt(np.clip(-2.0 * np.log(R_th), 1e-4, np.pi ** 2))

@@ -59,6 +59,7 @@ def main():
                        "k": a.k, "m": a.m, "rho": a.rho, "n_ep": a.E * a.seeds,
                        "acc": {m_: float(np.mean(v)) for m_, v in acc.items()}}
                 recs.append(rec)
+                json.dump({"args": vars(a), "records": recs}, open(out, "w"), indent=1)  # 增量落盘
                 print(f"p={p} r={r:g} σ_θ={st:.2f} | " +
                       " ".join(f"{m_}={100*rec['acc'][m_]:.1f}" for m_ in METHODS), flush=True)
     json.dump({"args": vars(a), "records": recs}, open(out, "w"), indent=1)
