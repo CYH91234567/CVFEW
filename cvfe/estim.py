@@ -78,6 +78,85 @@ def proto_ampweight(Zs, q_drop=0.25):
     return (w[..., None] * Zn).sum(axis=2)
 
 
+# ================================================================ 规范化（截面）类方法
+def canon_phase(Z, rule="max"):
+    """规范化相位 φ(z)：使 z·e^{-iφ(z)} 落在商空间 C^p/U(1) 的一个**截面**上。
+
+    合法性要求（旋转等变）：φ(e^{iθ}z) = φ(z) + θ ⇒ z·e^{-iφ(z)} 严格 U(1) 不变。
+    四种规则都满足，区别只在**稳定性**（P7：商丛无全局连续截面 ⇒ 必有割迹）：
+      max    : 取最大幅度坐标的相位（最稳的单点规则）
+      wmean  : 幅度加权圆均值 Σ|z_t|²e^{i·arg z_t}（平滑规则）
+      mean   : 朴素圆均值 Σz_t（低 SNR 下矢量相消）
+      first  : 第一坐标实正（最差规则，割迹代价演示）
+    """
+    if rule == "max":
+        t = np.argmax(np.abs(Z), axis=-1)
+        zt = np.take_along_axis(Z, t[..., None], axis=-1)[..., 0]
+        return np.angle(zt)
+    if rule == "wmean":
+        return np.angle((Z * np.abs(Z)).sum(-1))          # Σ|z_t|²e^{i arg z_t}
+    if rule == "mean":
+        return np.angle(Z.sum(-1))
+    if rule == "first":
+        return np.angle(Z[..., 0])
+    raise ValueError(rule)
+
+
+def canon_apply(Z, rule="max"):
+    return Z * np.exp(-1j * canon_phase(Z, rule))[..., None]
+
+
+def proto_canon(Zs, rule="max"):
+    """规范化后的欧氏原型（逐帧选截面 → 均值）。"""
+    return canon_apply(Zs, rule).mean(axis=2)
+
+
+def cls_canon(Zq, mu, aux=None, rule="max"):
+    """查询侧也规范化 → 欧氏距离（双侧截面）。"""
+    Zqc = canon_apply(Zq, rule)
+    d2 = (np.abs(Zqc[:, :, None, :] - mu[:, None, :, :]) ** 2).sum(-1)
+    return d2.argmin(-1)
+
+
+def canon_ref_vec(Zs, n_iter=6):
+    """MRA 标准规范化方向：支持集（跨类池化）二阶矩的主特征向量（幂迭代）。
+
+    Σ = Σ_j z_j z_j^H 在逐样本相位下是**相位不变**的（e^{iθ}e^{-iθ}=1），
+    故其主方向 v 是固定的参考轴；φ(z)=arg(z^H v) 满足旋转等变 ⇒ 合法截面。
+    v 的相位任意，但对同一 episode 内所有帧一致 ⇒ 不影响距离比较。
+    """
+    E, K, k, p = Zs.shape
+    Zf = Zs.reshape(E, K * k, p)
+    v = Zf.mean(1)                                        # (E,p)
+    v = v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-12)
+    for _ in range(n_iter):
+        coef = np.einsum("eip,ep->ei", Zf.conj(), v)      # (E,Kk)
+        v = np.einsum("ei,eip->ep", coef, Zf)
+        v = v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-12)
+    return v                                              # (E,p)
+
+
+def canon_apply_ref(Z, v):
+    """Z:(...,p) 或 (E,K,k,p)，v:(E,p)。按 z^H v 的相位规范化。"""
+    if Z.ndim == 3:                                       # (E,m,p)
+        phi = np.angle(np.einsum("emp,ep->em", Z, v))
+        return Z * np.exp(-1j * phi)[..., None]
+    E, K, k, p = Z.shape
+    Zf = Z.reshape(E, K * k, p)
+    phi = np.angle(np.einsum("eip,ep->ei", Zf, v))
+    return (Zf * np.exp(-1j * phi)[..., None]).reshape(E, K, k, p)
+
+
+def proto_canon_ref(Zs):
+    return canon_apply_ref(Zs, canon_ref_vec(Zs)).mean(axis=2)
+
+
+def cls_canon_ref(Zq, mu, v):
+    Zqc = canon_apply_ref(Zq, v)
+    d2 = (np.abs(Zqc[:, :, None, :] - mu[:, None, :, :]) ** 2).sum(-1)
+    return d2.argmin(-1)
+
+
 # ================================================================ PhaseMAP
 _PR_CACHE = {}
 
@@ -297,36 +376,84 @@ def cls_orbital(Zq, mu, aux=None, uncertainty=False):
     return d2.argmin(-1)
 
 
-def cls_marginal(Zq, mu, aux, n_grid=128):
-    """生成式边际似然分类（PhaseMAP 完整模型）：
-    score_c = log ∫ exp(rho_c cos(psi_c - θ)) pr_{sigma_th,c}(θ) dθ,  rho_c = 2|z^H mu_c|/sigma_c²
-    sigma_th→0 退化为欧氏；→π 退化为轨道（I_0 单调）。原型与分类共用同一似然。"""
+def cls_marginal_legacy(Zq, mu, aux, n_grid=128):
+    """（旧实现，仅用于回归核对，不得进入新主张）
+    原写法在低 σ²（学习到的嵌入）下会因 ρ 被 cap 到 700 而破坏二次项相消，退化到随机。"""
     th = np.linspace(-np.pi, np.pi, n_grid, endpoint=False)
-    st = aux["sigma_th"]                                                 # (E,K)
+    st = aux["sigma_th"]
     uth = np.unique(np.round(st, 6))
     if len(uth) == 1:
         pr = np.broadcast_to(_wrapped_prior(uth[0], n_grid)[None, None, :], (1, 1, 1) + (n_grid,))
         pr = np.broadcast_to(pr, (Zq.shape[0], 1, 1, n_grid))
     else:
-        prs = np.stack([_wrapped_prior(s, n_grid) for s in uth])         # (U,G)
-        pr = prs[np.searchsorted(uth, np.round(st, 6))]                   # (E,K,G)
-        pr = pr[:, None, :, :]                                            # (E,1,K,G)
-    ip = np.einsum("emp,ekp->emk", Zq.conj(), mu)                        # (E,m,K)
-    sig2 = np.broadcast_to(aux["sigma2"].mean(axis=1)[:, None, None], ip.shape)  # 池化 σ²
+        prs = np.stack([_wrapped_prior(s, n_grid) for s in uth])
+        pr = prs[np.searchsorted(uth, np.round(st, 6))][:, None, :, :]
+    ip = np.einsum("emp,ekp->emk", Zq.conj(), mu)
+    sig2 = np.broadcast_to(aux["sigma2"].mean(axis=1)[:, None, None], ip.shape)
     rho = np.minimum(2.0 * np.abs(ip) / np.maximum(sig2, 1e-12), 700.0)
-    psi = np.angle(ip)[..., None]                                        # (E,m,K,1)
+    psi = np.angle(ip)[..., None]
     c0 = np.zeros_like(ip)
-    for g0 in range(0, n_grid, 32):                                      # 分块控内存
+    for g0 in range(0, n_grid, 32):
         sl = slice(g0, min(g0 + 32, n_grid))
-        ll = np.exp(rho[..., None] * (np.cos(psi - th[sl]) - 1.0))       # (E,m,K,g)
+        ll = np.exp(rho[..., None] * (np.cos(psi - th[sl]) - 1.0))
         c0 += (ll * pr[..., sl]).sum(-1)
-    # 完整对数似然（跨类可比）：
-    # log p = -p·log σ² - (||z||²+||μ||²)/σ² + ρ + log Σ_θ exp(ρ(cos(ψ-θ)-1)) pr(θ)
-    zq2 = (np.abs(Zq) ** 2).sum(-1)                                      # (E,m)
-    mu2 = (np.abs(mu) ** 2).sum(-1)[:, None, :]                          # (E,1,K)
+    zq2 = (np.abs(Zq) ** 2).sum(-1)
+    mu2 = (np.abs(mu) ** 2).sum(-1)[:, None, :]
     p_dim = Zq.shape[-1]
     score = (-p_dim * np.log(sig2) - (zq2[..., None] + mu2) / sig2 + rho
              + np.log(np.maximum(c0, 1e-300)))
+    return score.argmax(-1)
+
+
+def cls_marginal(Zq, mu, aux, n_grid=128):
+    """生成式边际似然分类（PhaseMAP 完整模型）——数值稳定重写（2026-09-30）。
+
+    稳定形式（与原式代数等价，但无二次项相消）：
+        score_c = -p·log σ²  −  d_orb,c²/σ²  +  log ĉ0,c
+        d_orb,c² = ||z||² + ||μ_c||² − 2|z^H μ_c|      （轨道距离）
+        ĉ0,c     = Σ_g exp(ρ_c(cos(ψ_c − θ_g) − 1))·pr_{σ_θ,c}(θ_g),  ρ_c = 2|z^H μ_c|/σ²
+        log ĉ0 用 log-sum-exp 计算（ρ 不设上限）
+    极限（精确）：σ_θ→0 ⇒ log ĉ0 = ρ(cos ψ − 1) ⇒ score = −d_euclid²/σ²（欧氏）；
+                  σ_θ→π ⇒ pr 均匀、ĉ0≈1 ⇒ score = −d_orb²/σ²（轨道）。
+    旧实现把 ρ 截断到 700，在低 σ²（学习到的嵌入，σ²~1e-4）时使 1/σ² 量级的
+    二次项失去相消、排序被 ||μ_c||² 的浮点噪声主导 ⇒ 退化为随机猜测；本实现修复之。
+    """
+    th = np.linspace(-np.pi, np.pi, n_grid, endpoint=False)
+    st = aux["sigma_th"]                                                 # (E,K)
+    uth = np.unique(np.round(st, 6))
+    if len(uth) == 1:
+        pr1 = _wrapped_prior(uth[0], n_grid)                             # (G,)
+        LOGPR = np.where(pr1 > 0, np.log(np.maximum(pr1, 1e-300)), -np.inf)
+        LOGPR = LOGPR[None, None, None, :]                               # (1,1,1,G)
+    else:
+        prs = np.stack([_wrapped_prior(s, n_grid) for s in uth])         # (U,G)
+        PR = prs[np.searchsorted(uth, np.round(st, 6))]                  # (E,K,G)
+        LOGPR = np.where(PR > 0, np.log(np.maximum(PR, 1e-300)),
+                         -np.inf)[:, None, :, :]                         # (E,1,K,G)
+    ip = np.einsum("emp,ekp->emk", Zq.conj(), mu)                        # (E,m,K)
+    sig2 = np.broadcast_to(np.maximum(aux["sigma2"].mean(axis=1), 1e-12)[:, None, None],
+                           ip.shape)                                     # 池化 σ²
+    aip = np.abs(ip)
+    rho = 2.0 * aip / sig2                                               # 不截断
+    psi = np.angle(ip)[..., None]                                        # (E,m,K,1)
+    zq2 = (np.abs(Zq) ** 2).sum(-1)[..., None]                           # (E,m,1)
+    mu2 = (np.abs(mu) ** 2).sum(-1)[:, None, :]                          # (E,1,K)
+    d_orb2 = zq2 + mu2 - 2.0 * aip                                       # (E,m,K)
+    # log ĉ0：log-sum-exp（分块控内存）
+    m_best = np.full(ip.shape, -np.inf)
+    for g0 in range(0, n_grid, 32):
+        sl = slice(g0, min(g0 + 32, n_grid))
+        term = rho[..., None] * (np.cos(psi - th[sl]) - 1.0) + LOGPR[..., sl]
+        m_best = np.maximum(m_best, term.max(-1))
+    m_best = np.where(np.isfinite(m_best), m_best, 0.0)                  # 全 -inf 兜底
+    acc = np.zeros(ip.shape)
+    for g0 in range(0, n_grid, 32):
+        sl = slice(g0, min(g0 + 32, n_grid))
+        term = rho[..., None] * (np.cos(psi - th[sl]) - 1.0) + LOGPR[..., sl]
+        acc += np.exp(term - m_best[..., None]).sum(-1)
+    logc0 = m_best + np.log(np.maximum(acc, 1e-300))
+    p_dim = Zq.shape[-1]
+    score = -p_dim * np.log(sig2) - d_orb2 / sig2 + logc0
     return score.argmax(-1)
 
 
@@ -371,6 +498,23 @@ def run_method(name, Zs, Zq, mu_true=None, kappa_meta=None, sigma_th_oracle=None
     if name == "drop_agc":
         mu = proto_ampweight(Zs)
         return cls_euclid(Zq, mu), {}
+    if name in ("canon_first", "canon_mean", "canon_max", "canon_wmean"):
+        rule = name.split("_", 1)[1]
+        return cls_canon(Zq, proto_canon(Zs, rule), rule=rule), {}
+    if name == "canonX_ref":                      # 支持侧 MRA 规范化 + 查询侧免截面
+        return cls_orbital(Zq, proto_canon_ref(Zs)), {}
+    if name.startswith("canonX_"):                # 支持侧选截面 + 查询侧免截面（轨道读出）
+        rule = name.split("_", 1)[1]
+        return cls_orbital(Zq, proto_canon(Zs, rule)), {}
+    if name.startswith("canonQ_"):                # 支持侧轨道对齐 + 查询侧选截面
+        rule = name.split("_", 1)[1]
+        return cls_canon(Zq, proto_orbital(Zs), rule=rule), {}
+    if name in ("canon_ref", "canonX_ref"):       # MRA 标准：二阶矩主方向规范化
+        v = canon_ref_vec(Zs)
+        mu = proto_canon_ref(Zs)
+        if name == "canon_ref":
+            return cls_canon_ref(Zq, mu, v), {}
+        return cls_orbital(Zq, mu), {}
     if name == "phasemap":
         mu, aux = phasemap_em(Zs, sigma_th=None, kappa_meta=kappa_meta)
         return cls_orbital(Zq, mu, aux, uncertainty=False), aux
