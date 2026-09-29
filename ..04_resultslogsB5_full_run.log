@@ -1,0 +1,10 @@
+total conditions: 252, workers=6
+[    24s] done 1/252: fade=0.0|k=1|p=16|rho=0.0|sig=0.3|st=1.0472|tag=main euclid= 48.8 orbital= 73.5 phasemap= 73.5 pm_ok= 73.5 oracle= 99.3
+[   139s] done 11/252: fade=0.0|k=5|p=16|rho=0.0|sig=0.3|st=1.0472|tag=main euclid= 64.7 orbital= 96.9 phasemap= 96.9 pm_ok= 96.9 oracle= 99.4
+[   232s] done 21/252: fade=0.0|k=5|p=16|rho=0.0|sig=0.3|st=3.1416|tag=main euclid= 33.2 orbital= 96.8 phasemap= 96.8 pm_ok= 96.8 oracle= 99.3
+[   349s] done 31/252: fade=0.0|k=1|p=16|rho=0.7|sig=0.3|st=1.5708|tag=main euclid= 27.0 orbital= 43.2 phasemap= 43.2 pm_ok= 43.2 oracle= 88.6
+[   521s] done 41/252: fade=0.0|k=1|p=64|rho=0.0|sig=0.3|st=0.0|tag=main euclid= 63.8 orbital= 44.9 phasemap= 45.0 pm_ok= 44.9 oracle= 99.3
+[   694s] done 51/252: fade=0.0|k=5|p=64|rho=0.0|sig=0.3|st=0.2618|tag=main euclid= 93.0 orbital= 85.6 phasemap= 86.3 pm_ok= 86.5 oracle= 99.3
+[   830s] done 61/252: fade=0.0|k=1|p=64|rho=0.3|sig=0.3|st=2.0944|tag=main euclid= 26.5 orbital= 41.8 phasemap= 41.8 pm_ok= 41.8 oracle= 98.6
+[  1072s] done 71/252: fade=0.0|k=1|p=64|rho=0.7|sig=0.3|st=0.5236|tag=main euclid= 29.2 orbital= 30.1 phasemap= 30.1 pm_ok= 30.1 oracle= 88.5
+[  1258s] done 81/252: fade=0.0|k=5|p=64|rho=0.7|sig=0.3|st=0.5236|tag=main euclid= 43.9 orbital= 49.7 phasemap= 50.0 pm_ok= 50.1 oracle= 88.5
