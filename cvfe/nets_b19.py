@@ -35,11 +35,13 @@ def orbit_pool(h, n_iter=5, lam=1.0):
 
 
 class ComplexAMC2(nn.Module):
-    def __init__(self, ch=(32, 64, 128, 32), init="rand", pooling="mean", orb_iter=5):
+    def __init__(self, ch=(32, 64, 128, 32), init="rand", pooling="mean", orb_iter=5,
+                 orb_lam=1.0):
         super().__init__()
         c1, c2, c3, c4 = ch
         self.pooling = pooling
         self.orb_iter = orb_iter
+        self.orb_lam = orb_lam
         self.c1 = ComplexConv1d(1, c1, 7, padding=3); self.b1 = ModBN1d(c1); self.a1 = ModReLU(c1)
         self.c2 = ComplexConv1d(c1, c2, 5, padding=2); self.b2 = ModBN1d(c2); self.a2 = ModReLU(c2)
         self.c3 = ComplexConv1d(c2, c3, 3, padding=1); self.b3 = ModBN1d(c3); self.a3 = ModReLU(c3)
@@ -52,6 +54,8 @@ class ComplexAMC2(nn.Module):
                 conv.wi.data = conv.wi.data * w[None, None, :]
         if pooling == "gated":
             self.beta = nn.Parameter(torch.zeros(c4))
+        if pooling == "learnlam":
+            self.lamg = nn.Parameter(torch.zeros(c4))     # 逐通道对齐强度（σ(0)=0.5 起步）
         self.out_dim = 2 * c4 if pooling == "hybrid" else c4
 
     def hidden(self, z):                       # (B,L) complex -> (B,c4,L16)
@@ -68,9 +72,16 @@ class ComplexAMC2(nn.Module):
         if self.pooling == "power":
             return torch.sqrt((h.abs() ** 2).mean(dim=-1) + 1e-12)      # 实张量
         if self.pooling == "orbit":
-            return orbit_pool(h, n_iter=self.orb_iter)                   # 严格等变（分析式同步）
+            return orbit_pool(h, n_iter=self.orb_iter, lam=self.orb_lam)   # 严格等变（分析式同步）
         if self.pooling == "hybrid":
-            return torch.cat([orbit_pool(h, n_iter=self.orb_iter), h.mean(-1)], dim=-1)
+            return torch.cat([orbit_pool(h, n_iter=self.orb_iter, lam=self.orb_lam),
+                              h.mean(-1)], dim=-1)
+        if self.pooling == "learnlam":
+            # 逐通道学习对齐强度：e_c = σ(b_c)·orbit_c + (1−σ(b_c))·mean_c。
+            # 两分支严格等变 + 实系数混合 ⇒ 等变（架构层"截断对齐"，B26 Prop(v)）。
+            w = torch.sigmoid(self.lamg)[None, :]
+            return w * orbit_pool(h, n_iter=self.orb_iter,
+                                  lam=self.orb_lam) + (1.0 - w) * h.mean(-1)
         # gated：门仅依赖 |h|（不变标量）⇒ e = Σ a_t h_t 严格等变
         logits = self.beta[None, :, None] * torch.log(h.abs() + 1e-6)
         a = torch.softmax(logits, dim=-1)

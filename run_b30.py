@@ -63,9 +63,11 @@ def eval_cell_paired(trunk, zn, y, snr, sp_test, sigmas, epi_eval, seed0=7100):
     return out
 
 
-def train_one(arm, i0, zn, y, snr, sp, budget, val_every, val_n, epi_eval):
+def train_one(arm, i0, zn, y, snr, sp, budget, val_every, val_n, epi_eval,
+              lam=1.0):
     torch.manual_seed(i0); np.random.seed(i0)
-    trunk = ComplexAMC2(init="hann", pooling=arm, ch=(48, 96, 192, 48)).to(DEV)
+    trunk = ComplexAMC2(init="hann", pooling=arm, ch=(48, 96, 192, 48),
+                        orb_lam=lam).to(DEV)
     smp_tr = EpisodeSampler(zn, y, snr, classes=sp["train"], n_way=5, k_shot=5,
                             q_per_class=5, seed=4000, snr_min=6, snr_max=18)
     val_smps = make_train_val_samplers(zn, y, snr, sp, 88000)
@@ -134,6 +136,7 @@ def main():
     ap.add_argument("--mode", default="full", choices=["smoke", "full"])
     ap.add_argument("--epi-eval", type=int, default=500)
     ap.add_argument("--arms", default="gated,orbit,hybrid")
+    ap.add_argument("--lam", type=float, default=1.0, help="orbit 部分对齐强度（B26 收缩族旋钮；仅 orbit/hybrid 臂生效）")
     a = ap.parse_args()
     os.makedirs(os.path.join(a.out, "logs"), exist_ok=True)
     z, y, snr = D.load_radioml(a.cache)
@@ -158,13 +161,14 @@ def main():
     t00 = time.time()
     for arm in arms:
         for i0 in INIT_SEEDS:
-            key = f"{arm}_i{i0}"
+            tag = f"{arm}L{a.lam:g}" if a.lam != 1.0 else arm
+            key = f"{tag}_i{i0}"
             if key in recs["runs"]:
                 print(f"[skip] {key}", flush=True)
                 continue
             print(f"[run] {key}", flush=True)
             info, ev = train_one(arm, i0, zn, y, snr, sp, budget, val_every,
-                                 val_n, epi_eval)
+                                 val_n, epi_eval, lam=a.lam)
             recs["runs"][key] = {"info": info, "eval": ev}
             json.dump(recs, open(res_path, "w"), indent=1)
     print(f"B30[{a.mode}] DONE {(time.time()-t00)/60:.1f}min", flush=True)

@@ -70,7 +70,10 @@ def paired_diff(runs_a, runs_b, sel="valsel"):
 
 
 def main():
-    arms = {a: load_arm(a)["runs"] for a in ("orbit", "hybrid", "gated")}
+    extra = tuple(a for a in ("orbitL0.3", "learnlam")
+                 if os.path.exists(os.path.join(LOG, f"B30_{a}.json")))
+    arm_names = ("orbit", "hybrid", "gated") + extra
+    arms = {a: load_arm(a)["runs"] for a in arm_names}
     out = {"n_runs": {a: len(r) for a, r in arms.items()},
            "stats": {a: {sel: stats(r, sel) for sel in ("valsel", "endpoint", "ema")}
                      for a, r in arms.items()},
@@ -120,8 +123,8 @@ def main():
            "3 臂 × 16 init（与 B29d 同 init×流 4000）× 3200 步；评估 σ 配对"
            "（同 base episodes，平坦性=精确等变证书）。", "",
            "| 臂 | n | valsel 均值 | sd | max | 好盆率(≥93) | 双盆 gap |", "|---|---|---|---|---|---|---|"]
-    for a in ("orbit", "hybrid", "gated"):
-        s = out["stats"][a]["valsel"]
+    for a in arm_names:
+        s = out["stats"].get(a, {}).get("valsel", {"n": 0})
         if s["n"]:
             tab.append(f"| {a} | {s['n']} | {s['mean']:.2f} | {s['sd']:.2f} | {s['max']:.1f} "
                        f"| {s['good_rate']:.0%} ({s['good_n']}) | "
@@ -140,7 +143,7 @@ def main():
             "| init | orbit | hybrid | gated |", "|---|---|---|---|"]
     for k in pd1["keys"]:
         r = [acc(arms[a].get(f"{a}_{k}")) if arms[a].get(f"{a}_{k}") else None
-             for a in ("orbit", "hybrid", "gated")]
+             for a in arm_names]
         tab.append("| " + " | ".join(f"{x:.1f}" if x is not None else "—" for x in r) + " |")
     with open(os.path.join(BASE, "04_results", "tables", "T18_b30.md"), "w",
               encoding="utf-8") as f:
