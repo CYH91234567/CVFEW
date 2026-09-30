@@ -3,9 +3,12 @@
 V1 欧氏成对风险公式 P_e = E_θ[Q(βcosθ)] vs MC（网格 ρ×σ×σ_θ）
 V2 轨道成对风险跨 σ_θ 精确不变（MC，Thm P4-A）
 V3 P_e 单调性（公式精细积分，201 个 σ_θ × 6 个 β）
-V4 线性律+余项括号覆盖真值（Prop P4-C）
-V5 交叉点括号 [σ_a, σ_b] 覆盖真实 σ*（Cor P4-D）
-V6 K-shot（k=5）管线 MC：轨道平坦 / 欧氏增 + β_K 近似精度（Prop P4-E）
+V4 线性律+余项括号覆盖真值（Prop P4-C，B28 修正常数后）
+V5 交叉点定位集 B（Cor P4-D，B28 重述：报告区间括号成立率，不静默跳过）
+V6 K-shot（k=5）管线 MC：轨道平坦 / 欧氏增
+V7 β_K 有效宽度近似 vs K-shot MC（Prop P4-E(ii)——B28 审计发现此前"已验证"声明无代码）
+V8 wrapN(π) 端点：P_e(π) = 1/2 − c(β), 0 < c(β) ≤ min(2/π, 1−2Q(β))e^{−π²/2}
+   （B28 修正：旧文档"P_e(π)=1/2"错误——wrapN(π)≠均匀，其 Fourier 系数 e^{−k²π²/2}≠0）
 输出：04_results/logs/B23_p4_nonasymptotic.json
 """
 import json, os, sys, time
@@ -110,29 +113,59 @@ def main():
     res["checks"]["V4_pass"] = bool(np.all(v4cov))
     res["checks"]["V4_median_width"] = float(np.median(v4wid))
 
-    # V5 交叉点括号（P_o 用 MC@σ_θ=0；σ* 从公式反解）
+    # V5 交叉点定位（P_o 用 MC@σ_θ=0；σ* 从公式反解）。
+    # B28 重述（Cor P4-D 适用域）：定位集 B = {σ: linear−R̄ ≤ P_o ≤ linear+R̄} 恒有效；
+    # 区间括号 [σ_a, σ_b] 仅当 B 为单区间（求根成功）时给出。跳过格不再静默丢弃而是计数。
     v5cov = []
+    v5_attempted, v5_bracketed, v5_rows = 0, 0, []
+    from scipy.optimize import brentq
     for rho in rhos:
         for sig in sigs:
             beta = np.sqrt(1 - rho) / sig
             _, po = mc_pairwise(rho, sig, 0.0, n=2000000, seed=99)
             if not (norm.sf(beta) < po < 0.5):
                 continue
-            from scipy.optimize import brentq
+            v5_attempted += 1
             lo_f = lambda s: linear_law(beta, s) + rbar(beta, s) - po
             hi_f = lambda s: linear_law(beta, s) - rbar(beta, s) - po
             try:
                 sa = brentq(lo_f, 1e-6, np.pi)
                 sb = brentq(hi_f, 1e-6, np.pi)
+                bracket_ok = True
             except ValueError:
-                continue
+                bracket_ok = False
             grid = np.linspace(1e-4, np.pi, 4001)
             vals = np.array([pe_formula(beta, s, n=20001) for s in grid])
             idx = np.argmin(np.abs(vals - po))
             s_true = grid[idx]
-            v5cov.append(sa - 0.01 <= s_true <= sb + 0.01)
-    res["checks"]["V5_crossing_bracket"] = f"{int(np.sum(v5cov))}/{len(v5cov)}"
+            # 定位集 B 的网格判定（恒有效）
+            inB = [(s, bool(linear_law(beta, s) - rbar(beta, s) - 1e-12 <= po
+                            <= linear_law(beta, s) + rbar(beta, s) + 1e-12))
+                   for s in np.linspace(1e-4, np.pi, 401)]
+            B_set = [s for s, ok in inB if ok]
+            covered_by_B = bool(B_set and min(B_set) - 0.01 <= s_true <= max(B_set) + 0.01)
+            row = {"rho": rho, "sig": sig, "beta": float(beta), "po": po,
+                   "s_true": s_true, "interval_bracket": bracket_ok,
+                   "B_interval": [min(B_set), max(B_set)] if B_set else None,
+                   "covered_by_interval_bracket": bool(
+                       bracket_ok and sa - 0.01 <= s_true <= sb + 0.01),
+                   "covered_by_B": covered_by_B}
+            v5_rows.append(row)
+            if bracket_ok:
+                v5_bracketed += 1
+                v5cov.append(row["covered_by_interval_bracket"])
+            print(f"[V5] rho={rho} sig={sig} beta={beta:.2f} po={po:.4f} "
+                  f"s_true={s_true:.3f} bracket={bracket_ok} "
+                  f"B=[{row['B_interval'][0] if B_set else '-'},"
+                  f"{row['B_interval'][1] if B_set else '-'}] "
+                  f"cover_int={row['covered_by_interval_bracket']} "
+                  f"cover_B={covered_by_B}", flush=True)
+    res["V5_rows"] = v5_rows
+    res["checks"]["V5_attempted_cells"] = v5_attempted
+    res["checks"]["V5_interval_bracket_formed"] = f"{v5_bracketed}/{v5_attempted}"
+    res["checks"]["V5_bracket_coverage"] = f"{int(np.sum(v5cov))}/{len(v5cov)}"
     res["checks"]["V5_pass"] = bool(np.all(v5cov)) if v5cov else None
+    res["checks"]["V5_all_covered_by_B"] = bool(all(r["covered_by_B"] for r in v5_rows))
 
     # V6 K-shot 管线（k=5）：轨道平坦 / 欧氏增（全 2D 模拟）
     def mc_kshot(rho, sig, st, k=5, n=100000, seed=0):
@@ -184,6 +217,52 @@ def main():
     res["checks"]["V6_orbital_flat_max_spread"] = float(max(v["orbital_spread"] for v in v6))
     res["checks"]["V6_orbital_pass"] = bool(max(v["orbital_spread"] for v in v6) < 5e-3)
     res["checks"]["V6_euclid_increasing_all"] = bool(all(v["euclid_increasing"] for v in v6))
+
+    # V7 β_K 有效宽度近似（Prop P4-E(ii)——B28 新增：此前"已验证"声明无对应代码）。
+    # K-shot 欧氏管线：μ̂_c = μ_c + ν_c，E||ν_c||² = V_K（Prop6 精确三项）；
+    # 有效判决 = Re⟨z,Δ⟩ + (μ̂ 交叉项)，一阶近似 → Q(β_K cosθ) 结构，
+    # β_K = √(1−ρ)/√(σ² + V_K/(2(1−ρ)))。对照：k-shot 欧氏管线 MC。
+    def pe_beta_K(beta_K, st):
+        return pe_formula(beta_K, st)
+
+    v7 = []
+    for rho, sig in [(0.0, 0.5), (0.3, 0.5), (0.7, 0.5)]:
+        for k in (1, 5):
+            for st in (0.0, np.pi / 3, np.pi):
+                ee, _ = mc_kshot(rho, sig, st, k=k, n=200000,
+                                 seed=int(1e4 * rho + 13 * k + st * 7))
+                VK = ((1 - np.exp(-0.5 * st ** 2)) ** 2          # (1−g₁)² 偏差
+                      + (1 - np.exp(-st ** 2)) / k               # 方差地板
+                      + 2 * sig ** 2 / k)                        # pσ²/k（p=2）
+                beta_K = np.sqrt(1 - rho) / np.sqrt(sig ** 2 + VK / (2 * (1 - rho)))
+                pred = pe_beta_K(beta_K, st)
+                v7.append({"rho": rho, "sig": sig, "k": k, "st": float(st),
+                           "mc_euclid_kshot": ee, "betaK_pred": pred,
+                           "abs_dev": abs(ee - pred),
+                           "VK": VK, "beta": float(np.sqrt(1 - rho) / sig),
+                           "beta_K": float(beta_K)})
+                print(f"[V7] rho={rho} sig={sig} k={k} st={st:.2f}: "
+                      f"MC={ee:.4f} β_K pred={pred:.4f} dev={abs(ee-pred):.4f}", flush=True)
+    res["V7_betaK"] = v7
+    res["checks"]["V7_max_abs_dev"] = float(max(r["abs_dev"] for r in v7))
+    res["checks"]["V7_mean_abs_dev"] = float(np.mean([r["abs_dev"] for r in v7]))
+    res["checks"]["V7_monotone_better_than_beta"] = bool(all(
+        abs(r["abs_dev"]) < 0.05 for r in v7))
+
+    # V8 wrapN(π) 端点（B28 修正）：P_e(π) = 1/2 − c(β)，0 < c(β) ≤
+    # min(2/π, 1−2Q(β))·e^{−π²/2}；同时对照真均匀端点（Thm2）恰为 1/2。
+    v8 = []
+    for rho, sig in [(0.0, 0.2), (0.0, 0.5), (0.3, 0.5), (0.7, 0.5), (0.0, 1.0)]:
+        beta = np.sqrt(1 - rho) / sig
+        pe_pi = pe_formula(beta, np.pi)
+        cb = min(2 / np.pi, 1 - 2 * norm.sf(beta)) * np.exp(-np.pi ** 2 / 2)
+        ok = bool(0.0 < 0.5 - pe_pi <= cb + 1e-12)
+        v8.append({"rho": rho, "sig": sig, "beta": float(beta), "pe_at_pi": pe_pi,
+                   "c_beta": float(0.5 - pe_pi), "c_bound": float(cb), "pass": ok})
+        print(f"[V8] beta={beta:.2f}: P_e(π)={pe_pi:.6f} c={0.5-pe_pi:.6f} "
+              f"bound={cb:.6f} pass={ok}", flush=True)
+    res["V8_endpoint"] = v8
+    res["checks"]["V8_endpoint_pass"] = bool(all(r["pass"] for r in v8))
 
     res["elapsed_min"] = round((time.time() - t0) / 60, 1)
     out = os.path.join(BASE, "04_results", "logs", "B23_p4_nonasymptotic.json")

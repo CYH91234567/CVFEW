@@ -73,9 +73,12 @@ class EpisodeSampler:
         return 10 ** 9
 
     def sample(self, n_episodes, query_snr=None, inject=None, inj_strength=0.0,
-               energy_norm=True):
+               energy_norm=True, disjoint=True):
         """返回 Zs:(E,N,k,L), Zq:(E,N*q,L), yq:(E,N*q)。query_snr=None 时同层。
-        inject: (mode, strength) 或 None。注意注入在采样后叠加（叠加自然损伤之上）。"""
+        inject: (mode, strength) 或 None。注意注入在采样后叠加（叠加自然损伤之上）。
+        disjoint=True（B28 审计修复，默认）：同 SNR 层时查询帧从池中剔除支持帧——
+        此前支持/查询独立抽样约 7.5% 查询帧与支持帧重复，σ_θ=0 时重复帧为同一样本
+        （自动判对），绝对精度虚高 ~+0.1-0.3pt。disjoint=False 复现 B29 之前协议。"""
         E = n_episodes
         N, k, q, L = self.n_way, self.k_shot, self.q, self.z.shape[1]
         Zs = np.zeros((E, N, k, L), dtype=np.complex64)
@@ -91,7 +94,9 @@ class EpisodeSampler:
                 pool_s = self.idx_by.get((c, int(s_sup)))
                 pool_q = self.idx_by.get((c, int(s_qr)))
                 tries = 0
-                while (pool_s is None or len(pool_s) < k or pool_q is None or len(pool_q) < q) and tries < 20:
+                need_q = k + q if (query_snr is None and pool_q is pool_s) else q
+                while (pool_s is None or len(pool_s) < k or pool_q is None
+                       or len(pool_q) < need_q) and tries < 20:
                     s_sup = all_snrs[self.rng.randint(len(all_snrs))]
                     s_qr = s_sup if query_snr is None else all_snrs[self.rng.randint(len(all_snrs))]
                     pool_s = self.idx_by.get((c, int(s_sup)))
@@ -100,7 +105,13 @@ class EpisodeSampler:
                 if pool_s is None or pool_q is None:
                     raise RuntimeError("no pool for class/snr")
                 si = self.rng.choice(pool_s, size=k, replace=False)
-                qi = self.rng.choice(pool_q, size=q, replace=False)
+                if disjoint and pool_q is pool_s:
+                    pool_q_eff = pool_q[~np.isin(pool_q, si)]
+                    if len(pool_q_eff) < q:
+                        raise RuntimeError("pool too small for disjoint sampling")
+                else:
+                    pool_q_eff = pool_q
+                qi = self.rng.choice(pool_q_eff, size=q, replace=False)
                 Zs[e, i] = self.z[si]
                 Zq[e, i * q:(i + 1) * q] = self.z[qi]
                 yq[e, i * q:(i + 1) * q] = i
