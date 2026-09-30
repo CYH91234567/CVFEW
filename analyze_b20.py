@@ -70,9 +70,9 @@ def main():
                                                    "canon_ref": A(r, "canon_ref"),
                                                    "orbital": A(r, "orbital")})
                 if "h1b_vs_best_endpoint" in r:
-                    verdict["Pc"].append({"p": p, "rho": rho, "st": float(st),
+                    verdict["Pc"].append({"p_dim": p, "rho": rho, "st": float(st),
                                           "phML_minus_best": gP[-1],
-                                          "p": r["h1b_vs_best_endpoint"]["p"]})
+                                          "wilcoxon_p": r["h1b_vs_best_endpoint"]["p"]})
             lines.append(f"| {p} | {rho} | {np.mean(gX):+.1f} | {np.mean(gR):+.1f} "
                          f"| {np.mean(gP):+.1f} | {np.min(gP):+.1f} |")
 
@@ -94,10 +94,17 @@ def main():
     pb_ok = all(r["canon_max"] < r["canon_ref"] - 3 for r in verdict["Pb_collapse"])
     pc_ok = all(v["phML_minus_best"] >= -0.5 for v in verdict["Pc"])
     pd_ok = all(v["ok"] for v in verdict["Pd_order_violations"])
+    pc_worst = min(v["phML_minus_best"] for v in verdict["Pc"]) if verdict["Pc"] else float("nan")
+    pc_n_below = sum(1 for v in verdict["Pc"] if v["phML_minus_best"] < -0.5)
     verdict["verdict"] = {"Pa_canonXref_free_at_st0": bool(pa_ok),
                           "Pb_perframe_collapse": bool(pb_ok),
                           "Pc_phML_envelope": bool(pc_ok),
-                          "Pd_order_and_1shot": bool(pd_ok)}
+                          "Pc_worst_pp": float(pc_worst),
+                          "Pc_cells_below_-0.5": int(pc_n_below),
+                          "Pd_order_and_1shot": bool(pd_ok),
+                          "note_canonQ_ref": "as-run实现与canon_ref计算路径重复（分发bug，"
+                                             "B18定义的支持侧应为proto_orbital）；列保留但"
+                                             "解释时按canon_ref处理，canonQ分解列为future work"}
     json.dump(verdict, open(os.path.join(BASE, "04_results", "logs", "B20_p7_verdict.json"), "w"),
               indent=1)
     txt = "\n".join(lines)

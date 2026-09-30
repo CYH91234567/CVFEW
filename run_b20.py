@@ -11,8 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import run_b5 as R
 from cvfe import synth as S
 
-R.METHODS = R.METHODS + ["canon_max", "canon_wmean", "canon_ref", "canonX_ref",
-                         "canonQ_ref"]
+R.METHODS = R.METHODS + ["canon_first", "canon_mean", "canon_max", "canon_wmean",
+                         "canon_ref", "canonX_ref", "canonQ_ref"]
 
 
 def _cond_worker(job):
@@ -68,13 +68,16 @@ def main():
                                      a.K, a.m, epi))
     part_path = os.path.join(out, "logs", "B20_grid.json")
     rows = []
-    if os.path.exists(part_path):                          # 断点续跑
+    if os.path.exists(part_path):                          # 断点续跑（方法不全的记录作废重算）
         try:
             prev = json.load(open(part_path))
-            rows = list(prev["records"] if isinstance(prev, dict) else prev)
+            prev_recs = prev["records"] if isinstance(prev, dict) else prev
+            full = set(R.METHODS)
+            rows = [r for r in prev_recs if set(r["acc"]) == full]
             done = {_cond_key(j) for j in jobs} & {r["cond"] for r in rows}
             jobs = [j for j in jobs if _cond_key(j) not in done]
-            print(f"resume: {len(rows)} done, {len(jobs)} to go", flush=True)
+            print(f"resume: {len(rows)} complete ({len(prev_recs)} on file), "
+                  f"{len(jobs)} to go", flush=True)
         except Exception as e:
             print("resume load failed:", e, flush=True)
     print(f"B20 total conditions: {len(jobs)}, methods={len(R.METHODS)}, "
