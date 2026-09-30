@@ -173,6 +173,85 @@ def t7_joint_profile_endpoints(n=48, seed=0):
               lo <= med <= hi, f"median={med:.3f}")
 
 
+def t8_canon_ref_section(n=512, seed=0):
+    """T8（审计轮）锁定 canon_ref 截面性质，防止把代码"修"成文档误写的 z^H v。
+    T8a 逐帧相位剥离：固定 v 下代表元 z·e^{-iφ(z)} 对帧旋转不变（3-D/4-D 两路径）。
+    T8b 逐帧等变：φ(e^{iα}z)=φ(z)+α（z^T v）；z^H v 反等变（加倍相位）——
+       部署版在 σ_θ=1.0 必须显著优于 z^H v 误版。"""
+    rng = np.random.RandomState(seed)
+    mu = S.make_prototypes(5, 16, 0.3, rng)
+    Zs, Zq, yq = S.batch_episodes(mu, 5, 5, 75, 1.0, 0.2, n, seed=23)
+    v = E.canon_ref_vec(Zs)
+    # T8a：固定 v 的代表元对帧旋转不变（逐帧相位剥离）
+    for path, Z in (("3D", Zq[:8]), ("4D", Zs[:8])):
+        rep0 = E.canon_apply_ref(Z, v[:8] if path == "3D" else v[:8])
+        rot = np.exp(1j * 0.37)
+        rep1 = E.canon_apply_ref(Z * rot, v[:8])
+        err = np.abs(rep0 - rep1).max()
+        check(f"T8a rep invariant to frame rotation ({path} path)", err < 1e-10,
+              f"max_err={err:.2e}")
+    # T8b：σ_θ=1.0 下部署版 vs z^H v 误版
+    def classify_with(fn):
+        v_ = E.canon_ref_vec(Zs)
+        muc = fn(Zs, v_).mean(axis=2)
+        Zqc = fn(Zq, v_)
+        d2 = (np.abs(Zqc[:, :, None, :] - muc[:, None, :, :]) ** 2).sum(-1)
+        return float((d2.argmin(-1) == yq).mean())
+    def apply_H(Z, v_):
+        if Z.ndim == 3:
+            phi = np.angle(np.einsum("emp,ep->em", np.conj(Z), v_))
+            return Z * np.exp(-1j * phi)[..., None]
+        E_, K, k, p = Z.shape
+        Zf = Z.reshape(E_, K * k, p)
+        phi = np.angle(np.einsum("eip,ep->ei", np.conj(Zf), v_))
+        return (Zf * np.exp(-1j * phi)[..., None]).reshape(E_, K, k, p)
+    a_T = classify_with(E.canon_apply_ref)
+    a_H = classify_with(apply_H)
+    check("T8b TT section >= HH misread +20pt @ sigma_th=1.0", a_T >= a_H + 0.20,
+          f"TT={a_T:.3f} HH={a_H:.3f}")
+
+
+def _orbit_pool_np(h, n_iter=5, lam=1.0):
+    """orbit_pool 的 numpy 镜像（与 nets_b19.orbit_pool 结构逐字同构；
+    torch 版本机不可用，其等变性在服务器由 equivariance_error 实测）。"""
+    u = h.mean(-1)
+    for _ in range(n_iter):
+        ip = np.conj(u[..., None]) * h
+        w = np.exp(-1j * lam * np.angle(ip))
+        u = (h * w).mean(-1)
+    return u
+
+
+def t9_orbit_pool_equivariance(seed=0):
+    """T9（B30）：轨道池化（时间轴 L1-PCA）的三个性质（numpy 镜像，与实现无关）。
+    T9a 池化层等变：h→e^{iθ}h ⇒ u→e^{iθ}u。
+    T9b 相干增益：隐层相位近均匀（坏盆机制）时 orbit 嵌入幅度 >> mean 嵌入。
+    T9c L1-PCA 目标单调：obj(orbit) >= obj(mean)。"""
+    rng = np.random.RandomState(seed)
+    # T9a
+    h = rng.randn(8, 32, 64) + 1j * rng.randn(8, 32, 64)
+    u0 = _orbit_pool_np(h)
+    worst = 0.0
+    for th in (0.7, np.pi / 2, np.pi, 2.2):
+        ur = _orbit_pool_np(h * np.exp(1j * th))
+        worst = max(worst, float(np.abs(ur - u0 * np.exp(1j * th)).max()
+                                 / np.abs(u0).max()))
+    check("T9a orbit-pool equivariance", worst < 1e-12, f"rel_err={worst:.2e}")
+    # T9b：相位完全打散的隐层
+    ph = rng.uniform(-np.pi, np.pi, h.shape)
+    h_rand = h * np.exp(1j * ph)
+    em, eo = h_rand.mean(-1), _orbit_pool_np(h_rand)
+    gain = float(np.abs(eo).max(axis=-1).mean() / max(np.abs(em).max(axis=-1).mean(), 1e-12))
+    check("T9b orbit-pool coherence gain over mean (phase-scattered hidden)", gain > 3.0,
+          f"gain={gain:.2f}x（理论量级 ~√L 折扣后的同步收益）")
+    # T9c
+    def obj(e):
+        return np.abs(np.conj(e[..., None]) * h_rand).sum(-1)
+    om, oo = obj(h_rand.mean(-1)), obj(_orbit_pool_np(h_rand))
+    check("T9c orbit objective >= mean objective", float((oo - om).min()) >= -1e-8,
+          f"min_gain={float((oo - om).min()):.2e}")
+
+
 if __name__ == "__main__":
     print("=== B2 unit tests ===")
     t1_orbital_identity()
@@ -182,6 +261,8 @@ if __name__ == "__main__":
     t5_engine()
     t6_log_c0_equivalence()
     t7_joint_profile_endpoints()
+    t8_canon_ref_section()
+    t9_orbit_pool_equivariance()
     n_fail = sum(1 for _, ok in PASS if not ok)
     print(f"=== {len(PASS) - n_fail}/{len(PASS)} passed ===")
     sys.exit(1 if n_fail else 0)

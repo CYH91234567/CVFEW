@@ -5,7 +5,7 @@
   pred  = classify(Zq, proto, aux)         # Zq:(E,m,p) -> (E,m) 类别
 
 PhaseMAP：类条件 wrapped-normal 相位先验边际化的 EM（P2(ii) Bessel 闭式 E步）。
-  E步: gamma_j = E[e^{-i theta_j}|z_j] = c_1/c_0
+  E步: gamma_j = E[e^{-i theta_j}|z_j] = c_{-1}/c_0
        c_n = sum_l I_l(rho) a_{n-l} e^{i l psi},  a_m = exp(-m^2 sigma_th^2 / 2)
        rho = 2|z^H mu|/sigma^2,  psi = arg(z^H mu)
   M步: mu = sum_j w_j gamma_j z_j / sum_j w_j ;  sigma^2 由期望残差更新
@@ -18,10 +18,6 @@ from scipy.special import ive
 
 _L = 24
 _RHO_MAX = 200.0
-
-
-def _wrap(x):
-    return (x + np.pi) % (2 * np.pi) - np.pi
 
 
 # ================================================================ 原型估计
@@ -122,8 +118,8 @@ def canon_ref_vec(Zs, n_iter=6):
     """MRA 标准规范化方向：支持集（跨类池化）二阶矩的主特征向量（幂迭代）。
 
     Σ = Σ_j z_j z_j^H 在逐样本相位下是**相位不变**的（e^{iθ}e^{-iθ}=1），
-    故其主方向 v 是固定的参考轴；φ(z)=arg(z^H v) 满足旋转等变 ⇒ 合法截面。
-    v 的相位任意，但对同一 episode 内所有帧一致 ⇒ 不影响距离比较。
+    故其主方向 v 是固定的参考轴；v 的相位任意，但对同一 episode 内所有帧一致
+    （幂迭代 coef = z^H v，v 为 Σ 的主特征向量）。
     """
     E, K, k, p = Zs.shape
     Zf = Zs.reshape(E, K * k, p)
@@ -137,7 +133,15 @@ def canon_ref_vec(Zs, n_iter=6):
 
 
 def canon_apply_ref(Z, v):
-    """Z:(...,p) 或 (E,K,k,p)，v:(E,p)。按 z^H v 的相位规范化。"""
+    """Z:(...,p) 或 (E,K,k,p)，v:(E,p)。按 φ(z)=arg(z^T v) 的相位规范化。
+
+   为什么是 z^T v（非 z^H v）：截面须满足逐帧等变 φ(e^{iα}z)=φ(z)+α，
+    z^T v 满足之；而 z^H v 是**反**等变（φ(e^{iα}z)=φ(z)−α），其代表元
+    z·e^{−iφ} 会把逐帧相位 θ_j **加倍**而非剥离（数值确认：σ_θ=1.0 时
+    z^H v 版准确率 43% vs z^T v 版 96.6%@σ=0.1，平坦性消失）。等价地，
+    φ(z)=arg(z^T v) = −arg(z^H conj(v))，即对参考轴 conj(v) 的标准 MRA
+    对齐——把逐帧全局相位**解析地**同步掉（B20 canon_ref 全轴平坦的机理）。
+    """
     if Z.ndim == 3:                                       # (E,m,p)
         phi = np.angle(np.einsum("emp,ep->em", Z, v))
         return Z * np.exp(-1j * phi)[..., None]
@@ -596,7 +600,7 @@ def run_method(name, Zs, Zq, mu_true=None, kappa_meta=None, sigma_th_oracle=None
             Zqc = canon_apply_ref(Zq, v)
             return (np.abs(Zqc[:, :, None, :] - mu[:, None, :, :]) ** 2).sum(-1).argmin(-1), {}
         return cls_canon(Zq, proto_orbital(Zs), rule=rule), {}
-    if name in ("canon_ref", "canonX_ref"):       # MRA 标准：二阶矩主方向规范化
+    if name == "canon_ref":                       # MRA 标准：二阶矩主方向规范化
         v = canon_ref_vec(Zs)
         mu = proto_canon_ref(Zs)
         if name == "canon_ref":
@@ -618,9 +622,6 @@ def run_method(name, Zs, Zq, mu_true=None, kappa_meta=None, sigma_th_oracle=None
     if name == "phasemap_ml":                     # 完整模型：边际似然分类
         mu, aux = phasemap_em(Zs, sigma_th=None, kappa_meta=kappa_meta)
         return cls_marginal(Zq, mu, aux), aux
-    if name == "phasemap_euclid":                 # 消融：PhaseMAP原型+欧氏距离
-        mu, aux = phasemap_em(Zs, sigma_th=None, kappa_meta=kappa_meta)
-        return cls_euclid(Zq, mu), aux
     if name == "oracle":                          # 真原型上界
         mu_b = np.broadcast_to(mu_true, Zq.shape[:1] + mu_true.shape)
         return cls_orbital(Zq, mu_b), {}

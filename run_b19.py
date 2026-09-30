@@ -108,6 +108,7 @@ def heads_on(Zs, Zq, yq, sigma_true, unit=True):
     mu_p, aux_p = E.phasemap_em(Zs)
     out["phML"] = ((E.cls_marginal(Zq, mu_p, aux_p) == yq).mean(1)).tolist()
     kap = float(np.mean(aux_p["sigma_th"][:, 0]))
+    out["gamma_mag"] = float(np.mean(np.abs(aux_p["gam"])))   # 支持集对齐相干度（B30 机制诊断）
     return out, kap
 
 

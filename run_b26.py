@@ -277,8 +277,11 @@ def v3_claims(rows):
         per_lam.append(cell)
     crossovers = [c["lam"] for c in per_lam
                   if c["C6_softfull_range"] <= c["C6_bestself_range"]]
+    c2_ws = [c["lam"] for c in per_lam if "C2_pass_frac" in c]
+    c2_lo, c2_hi = (min(c2_ws), max(c2_ws)) if c2_ws else (None, None)
     claims = {"C1_at_lam": per_lam[1]["lam"] if len(per_lam) > 1 else None,
-              "C2_window": "[2.26, 6.72] (λ 网格第 7–10 点，窗口格点依赖)",
+              "C2_window": (f"[{c2_lo:.3f}, {c2_hi:.3f}]（由判定条件 2.26<=λ<=6.72 "
+                            f"实际选中的网格档，共 {len(c2_ws)} 档；窗口格点依赖）"),
               "C6_crossover_lam": min(crossovers) if crossovers else None,
               "detail": per_lam}
     return claims

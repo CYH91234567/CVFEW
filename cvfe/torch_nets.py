@@ -92,10 +92,3 @@ def equivariance_error(trunk, z, thetas=(np.pi / 4, np.pi / 2, np.pi), device="c
             den = f0.abs().norm(dim=-1).clamp_min(1e-12)
             errs.append((num / den).mean().item())
     return float(np.mean(errs))
-
-
-def pretrain_supervised(trunk, Z, y, epochs=15, lr=1e-3, batch=256, device="cuda",
-                        heads=11):
-    """监督预训练（自然数据，全类）。返回线性头准确率。"""
-    lin = nn.Linear(2 * trunk.n_out_real() if hasattr(trunk, "n_out_real") else 16, heads).to(device)
-    return lin

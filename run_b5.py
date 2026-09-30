@@ -29,10 +29,6 @@ def packbits_b64(arr):
     return base64.b64encode(np.packbits(np.asarray(arr, dtype=np.uint8))).decode()
 
 
-def unpackbits_b64(s, n):
-    return np.unpackbits(np.frombuffer(base64.b64decode(s), dtype=np.uint8), count=n)
-
-
 def angle_err(mu_hat, mu):
     """sin of 商空间角误差 [mu_hat] vs [mu]。mu_hat:(E,K,p) 或 (K,p)；mu:(K,p)。"""
     ipn = np.abs(np.einsum("...p,...p->...", mu_hat.conj(), mu)) / \

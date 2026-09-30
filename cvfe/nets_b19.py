@@ -17,11 +17,29 @@ import torch.nn.functional as F
 from cvfe.nets_b17 import ComplexConv1d, ModBN1d, ModReLU, cpool2
 
 
+def orbit_pool(h, n_iter=5, lam=1.0):
+    """时间轴 L1-PCA（轨道）池化：e_c = argmax_{|u|=1} Σ_t |h_c(t)^H u|。
+
+    坐标上升（与 estim.orbital_align / run_b19.l1pca_proto 严格同构，样本轴=时间轴）：
+      u <- (1/L) Σ_t h_c(t)·e^{−i·arg(u^H h_c(t))}，对齐相位 stop-gradient。
+    严格等变：h→e^{iθ}h ⇒ u→e^{iθ}u（对齐角 θ-无关）。
+    lam<1 为 B26 Prop(v) 的"截断对齐"插值：只旋转错配角的 λ 份（lam=0 退化为均值）。
+    h:(B,C,L) complex -> (B,C) complex。
+    """
+    u = h.mean(-1)
+    for _ in range(n_iter):
+        ip = u[..., None].conj() * h                                      # (B,C,L)
+        w = torch.exp(-1j * lam * torch.angle(ip)).detach()
+        u = (h * w).mean(-1)
+    return u
+
+
 class ComplexAMC2(nn.Module):
-    def __init__(self, ch=(32, 64, 128, 32), init="rand", pooling="mean"):
+    def __init__(self, ch=(32, 64, 128, 32), init="rand", pooling="mean", orb_iter=5):
         super().__init__()
         c1, c2, c3, c4 = ch
         self.pooling = pooling
+        self.orb_iter = orb_iter
         self.c1 = ComplexConv1d(1, c1, 7, padding=3); self.b1 = ModBN1d(c1); self.a1 = ModReLU(c1)
         self.c2 = ComplexConv1d(c1, c2, 5, padding=2); self.b2 = ModBN1d(c2); self.a2 = ModReLU(c2)
         self.c3 = ComplexConv1d(c2, c3, 3, padding=1); self.b3 = ModBN1d(c3); self.a3 = ModReLU(c3)
@@ -34,7 +52,7 @@ class ComplexAMC2(nn.Module):
                 conv.wi.data = conv.wi.data * w[None, None, :]
         if pooling == "gated":
             self.beta = nn.Parameter(torch.zeros(c4))
-        self.out_dim = c4
+        self.out_dim = 2 * c4 if pooling == "hybrid" else c4
 
     def hidden(self, z):                       # (B,L) complex -> (B,c4,L16)
         h = z[:, None, :]
@@ -49,6 +67,10 @@ class ComplexAMC2(nn.Module):
             return h.mean(dim=-1)
         if self.pooling == "power":
             return torch.sqrt((h.abs() ** 2).mean(dim=-1) + 1e-12)      # 实张量
+        if self.pooling == "orbit":
+            return orbit_pool(h, n_iter=self.orb_iter)                   # 严格等变（分析式同步）
+        if self.pooling == "hybrid":
+            return torch.cat([orbit_pool(h, n_iter=self.orb_iter), h.mean(-1)], dim=-1)
         # gated：门仅依赖 |h|（不变标量）⇒ e = Σ a_t h_t 严格等变
         logits = self.beta[None, :, None] * torch.log(h.abs() + 1e-6)
         a = torch.softmax(logits, dim=-1)

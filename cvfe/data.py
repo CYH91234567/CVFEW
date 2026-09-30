@@ -17,10 +17,6 @@ def energy_normalize(z, eps=1e-12):
     return z / np.maximum(e, eps)
 
 
-def wrap(x):
-    return (x + np.pi) % (2 * np.pi) - np.pi
-
-
 def features(z, mode):
     """复数帧 -> 实值特征。mode: amp | rip (Re,Im) | apc (amp+cos/sin phase)"""
     if mode == "amp":
