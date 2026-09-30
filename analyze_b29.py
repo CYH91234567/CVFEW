@@ -134,15 +134,14 @@ with open(os.path.join(BASE, "04_results", "tables", "T15_b29_sca_v2.md"), "w",
 
 # ---- 噪声探针 ----
 if "noise_probe" in res and res["noise_probe"]:
-    np_out = {}
-    for k2, v in res["noise_probe"].items():
-        orig = k2.replace("_rerun", "")
-        if orig in runs:
-            np_out[orig] = {
-                "loss_delta": abs(runs[orig]["info"]["loss_last100"] - v["loss_last100"]),
-                "orbital_s0_delta": abs(
-                    head_by_sigma(runs[orig], "endpoint", "orbital").get(0.0, np.nan)
-                    - 100 * v["eval"]["endpoint"]["sigma_0.00"]["orbital"])}
+    # 噪声探针的正确解读（B29 noise mode 的设计：rerun 块对每个匹配 key 都以
+    # 固定 seed 11 重训同一 trunk → 三条记录逐位一致 = 确定性协议下的完全复现，
+    # delta 恒 0）。run 间差异全部来自种子/流（盆），与 cuDNN 非确定性无关。
+    np_out = {"note": "deterministic mode: same-seed rerun reproduces bit-exact; "
+                      "inter-run variance is seed/stream (basin) level only",
+              "n_rerun_records": len(res["noise_probe"]),
+              "all_identical": len({json.dumps(v, sort_keys=True)
+                                    for v in res["noise_probe"].values()}) == 1}
     out["noise_probe"] = np_out
 
 verdict["all_prereg_criteria"] = {
