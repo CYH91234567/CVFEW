@@ -48,17 +48,29 @@ def stats(runs, sel="valsel"):
                             and (~good).sum() else None)}
 
 
+def _gamma_mag(v):
+    """eval[选点]['sigma_0.00']['gamma_mag']（支持集对齐相干度）。"""
+    for sel in ("valsel", "endpoint", "ema"):
+        gm = v["eval"].get(sel, {}).get("gamma_mag_0.00")
+        if gm is not None:
+            return gm
+    return None
+
+
 def paired_diff(runs_a, runs_b, sel="valsel"):
-    keys = sorted(set(runs_a) & set(runs_b))
+    # 两臂键前缀不同（orbit_i7 vs gated_i7）⇒ 按 init 匹配
+    by_a, by_b = {}, {}
+    for k, v in runs_a.items():
+        by_a[k.split("_i")[-1]] = v
+    for k, v in runs_b.items():
+        by_b[k.split("_i")[-1]] = v
+    keys = sorted(set(by_a) & set(by_b))
     d, gec = [], []
     for k in keys:
-        a, b = acc(runs_a[k], sel), acc(runs_b[k], sel)
+        a, b = acc(by_a[k], sel), acc(by_b[k], sel)
         if a is not None and b is not None:
             d.append(a - b)
-            ga = runs_a[k]["info"].get("gamma_mag_0.00") or runs_a[k]["eval"].get(
-                "sigma_0.00", {}).get("gamma_mag")
-            gb = runs_b[k]["info"].get("gamma_mag_0.00") or runs_b[k]["eval"].get(
-                "sigma_0.00", {}).get("gamma_mag")
+            ga = _gamma_mag(by_a[k]); gb = _gamma_mag(by_b[k])
             if ga is not None and gb is not None:
                 gec.append(100 * (ga - gb))
     p = float(wilcoxon(d).pvalue) if len(d) > 3 and not np.allclose(d, 0) else None
@@ -120,8 +132,9 @@ def main():
     json.dump(out, open(os.path.join(LOG, "B30_verdict.json"), "w"), indent=1)
 
     tab = ["# T18 — B30 轨道池化（分析式相位同步）vs 门控池化（PREREG_B30）", "",
-           "3 臂 × 16 init（与 B29d 同 init×流 4000）× 3200 步；评估 σ 配对"
-           "（同 base episodes，平坦性=精确等变证书）。", "",
+           "5 臂（gated 对照 / orbit λ=1 / hybrid / orbit λ=0.3 / learnlam）× 16 init"
+           "（与 B29d 同 init×流 4000）× 3200 步；评估 σ 配对（同 base episodes，"
+           "平坦性=精确等变证书）。", "",
            "| 臂 | n | valsel 均值 | sd | max | 好盆率(≥93) | 双盆 gap |", "|---|---|---|---|---|---|---|"]
     for a in arm_names:
         s = out["stats"].get(a, {}).get("valsel", {"n": 0})
