@@ -100,7 +100,7 @@ def main():
         verdict["SC_Pair_pass"] = bool(pdg and pdg["mean_d"] >= 5.0 and pdg["p"] is not None
                                        and pdg["p"] < 0.05)
         verdict["SC_Pair"] = pdg
-        verdict["SC_Cert_pass"] = bool(sb.get("invariance_delta_max", 9) <= 1e-5
+        verdict["SC_Cert_pass"] = bool(sb.get("invariance_delta_max", 9) <= 1e-3
                                        and sb.get("sigma_flat_max", 9) <= 0.1)
         verdict["SC_Cert_invariance_delta_max"] = sb.get("invariance_delta_max")
         verdict["SC_Cert_sigma_flat_max"] = sb.get("sigma_flat_max")

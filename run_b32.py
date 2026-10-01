@@ -179,7 +179,10 @@ def main():
         budget, val_every, val_n, epi_eval = a.budget, 100, 100, a.epi_eval
 
     for arm in arms:
-        res_path = os.path.join(a.out, "logs", a.out_name or f"B32_{arm}.json")
+        oname = a.out_name or f"B32_{arm}.json"
+        if not oname.endswith(".json"):            # --out-name 须含 .json，否则静默写旁路文件
+            oname += ".json"
+        res_path = os.path.join(a.out, "logs", oname)
         recs = {"meta": {"prereg": "PREREG_B32.md (B32-A 复合不变性)", "arm": arm,
                          "budget": budget, "inits": list(INIT_SEEDS), "stream_seed": 4000,
                          "eval": "sigma-paired (same base episodes across sigma)",
