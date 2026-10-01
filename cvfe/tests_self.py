@@ -252,6 +252,45 @@ def t9_orbit_pool_equivariance(seed=0):
           f"min_gain={float((oo - om).min()):.2e}")
 
 
+def _invariant_stats_np(h, tau_max=6):
+    """invariant_stats 的 numpy 镜像（性质与实现无关）。"""
+    L = h.shape[-1]
+    feats = [(h[..., tau:] * np.conj(h[..., : L - tau])).mean(-1)
+             for tau in range(1, tau_max + 1)]
+    a2 = np.abs(h) ** 2
+    feats += [a2.mean(-1), (a2 ** 2).mean(-1)]
+    return np.stack(feats, axis=-1)
+
+
+def t10_invariant_stats(seed=0):
+    """T10（B31）：自相关/矩统计量的**精确不变性**与结构保持。
+    T10a 不变性：h→e^{iθ}h ⇒ e 完全不变（非仅等变）。
+    T10b 结构保持：相位差信息保留（两信号仅时间相位轨迹不同 ⇒ 特征不同）。"""
+    rng = np.random.RandomState(seed)
+    h = rng.randn(8, 32, 64) + 1j * rng.randn(8, 32, 64)
+    e0 = _invariant_stats_np(h)
+    worst = 0.0
+    for th in (0.7, np.pi / 2, np.pi, 2.2):
+        e1 = _invariant_stats_np(h * np.exp(1j * th))
+        worst = max(worst, float(np.abs(e1 - e0).max() / max(np.abs(e0).max(), 1e-12)))
+    check("T10a invariant_stats exact invariance", worst < 1e-14, f"rel={worst:.2e}")
+    # T10b：时间相位轨迹不同的两信号 ⇒ 自相关相位不同（结构被保留）
+    ph = 0.3 * np.arange(64)                                  # 线性相位斜坡（CFO 型）
+    h2 = h * np.exp(1j * ph)[None, None, :]
+    d = np.abs(_invariant_stats_np(h) - _invariant_stats_np(h2)).max()
+    base = np.abs(_invariant_stats_np(h)).max()
+    check("T10b autocorr preserves phase-structure (CFO ramp changes features)",
+          d > 0.05 * base, f"rel_change={d/base:.3f}")
+    # T10c：幅度缩放按齐次性缩放统计量（R(τ)/m2 二次、m4 四次），相位不受污染
+    hs = h * 2.0
+    e_s = _invariant_stats_np(hs)
+    scale = np.ones_like(e0)          # 前 tau_max+1 项二次、最后 m4 四次
+    scale[..., -1] = 16.0
+    scale[..., :-1] = 4.0
+    check("T10c amplitude scaling follows degree homogeneity",
+          float(np.abs(e_s - scale * e0).max() / np.abs(e0).max()) < 1e-12)
+
+
 if __name__ == "__main__":
     print("=== B2 unit tests ===")
     t1_orbital_identity()
@@ -263,6 +302,7 @@ if __name__ == "__main__":
     t7_joint_profile_endpoints()
     t8_canon_ref_section()
     t9_orbit_pool_equivariance()
+    t10_invariant_stats()
     n_fail = sum(1 for _, ok in PASS if not ok)
     print(f"=== {len(PASS) - n_fail}/{len(PASS)} passed ===")
     sys.exit(1 if n_fail else 0)

@@ -56,7 +56,30 @@ class ComplexAMC2(nn.Module):
             self.beta = nn.Parameter(torch.zeros(c4))
         if pooling == "learnlam":
             self.lamg = nn.Parameter(torch.zeros(c4))     # 逐通道对齐强度（σ(0)=0.5 起步）
-        self.out_dim = 2 * c4 if pooling == "hybrid" else c4
+        self.tau_max = 6
+        if pooling == "autocorr":
+            # 不变结构读出：R_c(τ) (τ=1..tau_max) + m2, m4 ⇒ C*(tau_max+2) 复向量
+            self.out_dim = c4 * (self.tau_max + 2)
+        else:
+            self.out_dim = 2 * c4 if pooling == "hybrid" else c4
+
+    def invariant_stats(self, h):
+        """不变结构读出（B31）：对全局相位精确不变、保留时间相位结构。
+
+        R_c(τ) = mean_t h_c(t+τ)·conj(h_c(t))  ——相位差统计（自相关⇒频谱结构）
+        m2_c = mean_t|h_c(t)|², m4_c = mean_t|h_c(t)|⁴ ——高阶矩（星座密度）
+        全部满足 h→e^{iθ}h 时不变（相位差/模值均不受影响）⇒ 嵌入精确不变（非等变），
+        无相干求和 ⇒ 无相消；不对齐时间相位 ⇒ 保信息（B30 命题二分法的正解）。
+        h:(B,C,L) -> (B, C*(tau_max+2)) complex。
+        """
+        L = h.shape[-1]
+        feats = []
+        for tau in range(1, self.tau_max + 1):
+            feats.append((h[..., tau:] * h[..., : L - tau].conj()).mean(-1))
+        a2 = h.abs() ** 2
+        feats.append(a2.mean(-1))                        # m2（实数进复向量实部）
+        feats.append((a2 ** 2).mean(-1))                 # m4
+        return torch.cat(feats, dim=-1)
 
     def hidden(self, z):                       # (B,L) complex -> (B,c4,L16)
         h = z[:, None, :]
@@ -82,6 +105,10 @@ class ComplexAMC2(nn.Module):
             w = torch.sigmoid(self.lamg)[None, :]
             return w * orbit_pool(h, n_iter=self.orb_iter,
                                   lam=self.orb_lam) + (1.0 - w) * h.mean(-1)
+        if self.pooling == "autocorr":
+            return self.invariant_stats(h)               # 精确不变 + 结构保持（B31）
+        if self.pooling == "nopool":
+            return h.reshape(h.shape[0], -1)             # 序列拉平（无池化=无相消）
         # gated：门仅依赖 |h|（不变标量）⇒ e = Σ a_t h_t 严格等变
         logits = self.beta[None, :, None] * torch.log(h.abs() + 1e-6)
         a = torch.softmax(logits, dim=-1)

@@ -29,9 +29,12 @@ from run_b29c import make_train_val_samplers
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
 INIT_SEEDS = (7, 13, 17, 19, 29, 31, 41, 43, 47, 53, 59, 61, 71, 79, 83, 89)
 SIG = (0.0, np.pi / 3, np.pi)
+# 不变读出（嵌入精确全局相位不变）：原型层不能再做相位对齐（l1pca 会
+# 对齐 R(τ) 的相位差结构=破坏信息，B30 教训在原型层重演）；用均值原型+欧氏距离。
+INVARIANT_ARMS = {"autocorr", "power"}
 
 
-def quick_val_train(trunk, val_smps, n):
+def quick_val_train(trunk, val_smps, n, arm="gated"):
     trunk.eval()
     vals = []
     for smp, st in val_smps:
@@ -39,7 +42,10 @@ def quick_val_train(trunk, val_smps, n):
         Zs, Zq, yq = smp.sample(n, inject=inj)
         es = cnorm(embed(trunk, Zs, device=DEV)).astype(np.complex128)
         eq = cnorm(embed(trunk, Zq, device=DEV)).astype(np.complex128)
-        pred = E.cls_orbital(eq, E.proto_orbital(es))
+        if arm in INVARIANT_ARMS:
+            pred = E.cls_euclid(eq, E.proto_euclid(es))
+        else:
+            pred = E.cls_orbital(eq, E.proto_orbital(es))
         vals.append(float((pred == yq).mean()))
     trunk.train()
     return float(np.mean(vals))
@@ -88,16 +94,20 @@ def train_one(arm, i0, zn, y, snr, sp, budget, val_every, val_n, epi_eval,
         m = Zq_t.shape[1]
         es = unit_norm(trunk(Zs_t.reshape(-1, L)).reshape(B, N, k, -1))
         eq = unit_norm(trunk(Zq_t.reshape(-1, L)).reshape(B, m, -1))
-        mu = unit_norm(l1pca_proto(es, 5))
-        ip = torch.einsum("bmc,bnc->bmn", eq.conj(), mu)
-        d2 = 2.0 - 2.0 * ip.abs()
+        if arm in INVARIANT_ARMS:
+            mu = unit_norm(es.mean(2))                     # 均值原型（无对齐）
+            d2 = ((eq.unsqueeze(2) - mu.unsqueeze(1)).abs() ** 2).sum(-1)
+        else:
+            mu = unit_norm(l1pca_proto(es, 5))
+            ip = torch.einsum("bmc,bnc->bmn", eq.conj(), mu)
+            d2 = 2.0 - 2.0 * ip.abs()
         loss = F.cross_entropy(-d2.reshape(-1, N),
                                torch.as_tensor(yq.reshape(-1), device=DEV))
         opt.zero_grad(); loss.backward(); opt.step()
         ema_update(ema_state, trunk)
         hist.append(float(loss.item()))
         if (it + 1) % val_every == 0:
-            vt = quick_val_train(trunk, val_smps, val_n)
+            vt = quick_val_train(trunk, val_smps, val_n, arm=arm)
             if vt > best_val:
                 best_val, best_it = vt, it + 1
                 best_state = {kk: vv.detach().cpu().clone()
@@ -145,7 +155,7 @@ def main():
 
     arms = a.arms.split(",")
     if a.mode == "smoke":
-        arms, budget, val_every, val_n, epi_eval = ("orbit",), 60, 20, 10, 20
+        arms, budget, val_every, val_n, epi_eval = tuple(a.arms.split(",")), 60, 20, 10, 20
     else:
         budget, val_every, val_n, epi_eval = 3200, 100, 100, a.epi_eval
 
