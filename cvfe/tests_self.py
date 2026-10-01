@@ -125,10 +125,8 @@ def t5_engine(seed=0):
     check("T5e Zq shape (E,m,p)", Zq5.shape == (16, 40, 8), str(Zq5.shape))
     check("T5f yq shape (E,m)", yq5.shape == (16, 40), str(yq5.shape))
     # sigma_theta=0, 低噪: 最近原型应几乎全对
-    pred = E.cls_euclid(Zq5, E.proto_euclid(Zs5)) if False else None
-    from cvfe import estim as _E
-    acc = (_E.cls_orbital(Zq5, mu5[None, :, :].repeat(16, 0)) == yq5).mean() if False else None
     # 直接用真原型分类（oracle 下应≈1）
+    from cvfe import estim as _E
     pred_true = np.stack([(_E.cls_orbital(Zq5[i:i+1], mu5[None]) [0]) for i in range(16)])
     acc = float((pred_true == yq5).mean())
     check("T5g oracle-orbital acc≈1 at clean low-noise", acc > 0.98, f"acc={acc:.3f}")

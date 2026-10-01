@@ -153,11 +153,12 @@ def main():
     for k, v in verdict.items():
         tab.append(f"- {k}: {v}")
     tab += ["", "## 逐 run（valsel 三头均值）", "",
-            "| init | orbit | hybrid | gated |", "|---|---|---|---|"]
-    for k in pd1["keys"]:
-        r = [acc(arms[a].get(f"{a}_{k}")) if arms[a].get(f"{a}_{k}") else None
+            "| init | " + " | ".join(arm_names) + " |",
+            "|---|" + "---|" * len(arm_names)]
+    for k in pd1["keys"]:                    # keys 为 init 数字（orbit_i7 → "7"）
+        r = [acc(arms[a].get(f"{a}_i{k}")) if arms[a].get(f"{a}_i{k}") else None
              for a in arm_names]
-        tab.append("| " + " | ".join(f"{x:.1f}" if x is not None else "—" for x in r) + " |")
+        tab.append("| " + k + " | " + " | ".join(f"{x:.1f}" if x is not None else "—" for x in r) + " |")
     with open(os.path.join(BASE, "04_results", "tables", "T18_b30.md"), "w",
               encoding="utf-8") as f:
         f.write("\n".join(tab))

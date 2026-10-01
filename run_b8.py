@@ -9,7 +9,7 @@
 方法: euclid, orbital, tta_euclid, circcoord, whiten, drop_agc,
       phasemap, phasemap_ml, phasemap_w（9 个）
 """
-import argparse, base64, json, os, sys, time, zlib
+import argparse, json, os, sys, time, zlib
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -18,10 +18,6 @@ from cvfe.episodes import EpisodeSampler, make_class_splits
 
 METHODS = ["euclid", "orbital", "tta_euclid", "circcoord", "whiten", "drop_agc",
            "phasemap", "phasemap_ml", "phasemap_w"]
-
-
-def packbits_b64(arr):
-    return base64.b64encode(np.packbits(np.asarray(arr, dtype=np.uint8))).decode()
 
 
 def eval_episodes(sampler, n_epi, methods, chunk=32, kappa_meta=np.pi / 3,
@@ -66,8 +62,7 @@ def _worker_b8(job):
     return {"cond": key, "snr": int(sl), "inject_mode": mode,
             "inject_strength": float(strength), "k": k,
             "acc": {m: float(np.mean(accs[m])) for m in METHODS},
-            "acc_se": {m: float(np.std(accs[m]) / np.sqrt(len(accs[m]))) for m in METHODS},
-            "per_episode_b64": {m: packbits_b64(np.array(accs[m]) > 0) for m in METHODS}}
+            "acc_se": {m: float(np.std(accs[m]) / np.sqrt(len(accs[m]))) for m in METHODS}}
 
 
 def main():

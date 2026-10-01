@@ -603,9 +603,7 @@ def run_method(name, Zs, Zq, mu_true=None, kappa_meta=None, sigma_th_oracle=None
     if name == "canon_ref":                       # MRA 标准：二阶矩主方向规范化
         v = canon_ref_vec(Zs)
         mu = proto_canon_ref(Zs)
-        if name == "canon_ref":
-            return cls_canon_ref(Zq, mu, v), {}
-        return cls_orbital(Zq, mu), {}
+        return cls_canon_ref(Zq, mu, v), {}
     if name == "phasemap":
         mu, aux = phasemap_em(Zs, sigma_th=None, kappa_meta=kappa_meta)
         return cls_orbital(Zq, mu, aux, uncertainty=False), aux

@@ -227,6 +227,10 @@ def t2_radioml_table():
                      " | ".join(f"{100*avg[m]:.1f}" for m in methods) + " |")
     open(os.path.join(TAB, "T2_radioml.md"), "w", encoding="utf-8").write(
         "# T2 真实IQ少样本（RML2016.10a, 11类5-way, 600 episodes/格, 能量归一化原始IQ特征）\n\n"
+        "> 2026-10-02 重跑（1-shot phML 列修复：旧产物用修复前 cls_marginal，1-shot "
+        "σ̂²→1e-9 时二次项相消被 ρ≤700 截断破坏 → 随机水平 20-23%；修复后 1-shot "
+        "phML = 33.1-33.5 ≈ orbital）。同时采用 B28 后的 disjoint 采样默认（查询帧"
+        "剔除支持帧），其余方法数字随之 ±0.6pt。\n\n"
         + "\n".join(lines) + "\n")
     print("T2 saved")
 

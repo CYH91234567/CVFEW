@@ -4,13 +4,13 @@
   主网格 static: sigma_th(7) x rho(3) x p(2) x k(2) x fade_q(2)  [+ sigma 扫描]
   变体 slice: rho=0.3,p=64,fade=0 上 cfo_ramp / bimodal / absphase x sigma_th(7) x k(2)
 方法 13 个（见 estim.run_method）。每条件 E 个 episode（chunk 250），逐episode 0/1 配对记录
-（packbits+base64 压缩存储）。
+（per-episode 0/1 数组仅供 chunk 内配对检验，不进落盘产物）。
 
 假设检验：
   H1b: phasemap vs min(euclid, orbital) 的配对 Wilcoxon（5-shot 部分相干区）
   H2:  风险差曲线随 sigma_th 单调性（B9 汇总时检验）
 """
-import argparse, base64, json, os, sys, time, zlib
+import argparse, json, os, sys, time, zlib
 import numpy as np
 from scipy import stats
 
@@ -23,10 +23,6 @@ METHODS = ["euclid", "cosine", "hermitian", "orbital", "tta_euclid", "circcoord"
            "phasemap_ok", "oracle"]
 
 SIGMAS = [0.0, np.pi / 12, np.pi / 6, np.pi / 3, np.pi / 2, 2 * np.pi / 3, np.pi]
-
-
-def packbits_b64(arr):
-    return base64.b64encode(np.packbits(np.asarray(arr, dtype=np.uint8))).decode()
 
 
 def angle_err(mu_hat, mu):
@@ -77,8 +73,7 @@ def run_condition(mu, K, k, m, sigma_th, sigma, Epi, seed, variant="static",
             gap3.extend(rel.ravel().tolist())
         done += n
     out = {"acc": {mth: float(np.mean(n_ok[mth])) for mth in METHODS},
-           "acc_se": {mth: float(np.std(n_ok[mth]) / np.sqrt(Epi)) for mth in METHODS},
-           "per_episode_b64": {mth: packbits_b64(n_ok[mth]) for mth in METHODS}}
+           "acc_se": {mth: float(np.std(n_ok[mth]) / np.sqrt(Epi)) for mth in METHODS}}
     if k == 1 and km_acc:
         out["phasemap_kmsweep"] = km_acc
     if k >= 2 and with_angle:
@@ -126,8 +121,6 @@ def _cond_worker(job):
         better = "euclid" if np.mean(n_ok["euclid"]) >= np.mean(n_ok["orbital"]) else "orbital"
         r["h1b_vs_best_endpoint"] = paired_test(n_ok["phasemap"], n_ok[better])
         r["h1b_best_endpoint"] = better
-    # per_episode 不进返回值（太大），返回 acc 与检验结果即可
-    r.pop("per_episode_b64", None)
     r["angle_err_median"] = r.get("angle_err_median", {})
     return r
 

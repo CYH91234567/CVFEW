@@ -66,19 +66,31 @@ def pretrain_supervised(trunk, Z, y, epochs=12, lr=1e-3, bs=256, device=DEV, wd=
 
 
 def eval_suite_on_emb(emb_s, emb_q, yq, methods, kappa_meta=np.pi / 3):
+    """冻结嵌入上的估计层评估。B6 表的 phasemap_w/phasemap_unc 曾与 phasemap
+    逐位相同（else 分支未传 hetero_weights / uncertainty，2026-10-02 审计 S5），
+    现按 run_method 注册表语义分发。"""
     acc = {}
     for m in methods:
-        if m in ("euclid",):
+        if m == "euclid":
             pred = E.cls_euclid(emb_q, E.proto_euclid(emb_s))
         elif m == "orbital":
             pred = E.cls_orbital(emb_q, E.proto_orbital(emb_s))
         elif m == "tta_euclid":
             pred = E.cls_orbital(emb_q, E.proto_euclid(emb_s))
-        else:
-            _, _ = None, None
+        elif m == "phasemap":
             mu, aux = E.phasemap_em(emb_s, kappa_meta=kappa_meta)
-            pred = E.cls_marginal(emb_q, mu, aux) if m == "phasemap_ml" else \
-                E.cls_orbital(emb_q, mu, aux)
+            pred = E.cls_orbital(emb_q, mu, aux)
+        elif m == "phasemap_ml":
+            mu, aux = E.phasemap_em(emb_s, kappa_meta=kappa_meta)
+            pred = E.cls_marginal(emb_q, mu, aux)
+        elif m == "phasemap_w":                       # 异方差精度加权（P3 组件）
+            mu, aux = E.phasemap_em(emb_s, kappa_meta=kappa_meta, hetero_weights=True)
+            pred = E.cls_orbital(emb_q, mu, aux)
+        elif m == "phasemap_unc":                     # 一阶不确定性修正
+            mu, aux = E.phasemap_em(emb_s, kappa_meta=kappa_meta)
+            pred = E.cls_orbital(emb_q, mu, aux, uncertainty=True)
+        else:
+            raise ValueError(m)
         acc[m] = float((pred == yq).mean())
     return acc
 

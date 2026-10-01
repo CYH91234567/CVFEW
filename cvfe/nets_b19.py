@@ -36,7 +36,7 @@ def orbit_pool(h, n_iter=5, lam=1.0):
 
 class ComplexAMC2(nn.Module):
     def __init__(self, ch=(32, 64, 128, 32), init="rand", pooling="mean", orb_iter=5,
-                 orb_lam=1.0):
+                 orb_lam=1.0, rdim=128, tau_max=6):
         super().__init__()
         c1, c2, c3, c4 = ch
         self.pooling = pooling
@@ -56,10 +56,20 @@ class ComplexAMC2(nn.Module):
             self.beta = nn.Parameter(torch.zeros(c4))
         if pooling == "learnlam":
             self.lamg = nn.Parameter(torch.zeros(c4))     # 逐通道对齐强度（σ(0)=0.5 起步）
-        self.tau_max = 6
+        self.tau_max = tau_max
+        # ---- B32：不变读出的复合升级（不变统计 + 学习度量头，B32-A 复合不变性）----
+        # metric/invpow_metric：实化不变统计（+功率）→ 实线性投影 → L2 归一。
+        # 线性层作用在**逐点不变**的特征上 ⇒ 复合后嵌入精确不变（构造性证书，δ=0）。
+        if pooling in ("metric", "invpow_metric"):
+            din = 2 * c4 * (tau_max + 2) + (c4 if pooling == "invpow_metric" else 0)
+            self.metric = nn.Linear(din, rdim)
         if pooling == "autocorr":
             # 不变结构读出：R_c(τ) (τ=1..tau_max) + m2, m4 ⇒ C*(tau_max+2) 复向量
-            self.out_dim = c4 * (self.tau_max + 2)
+            self.out_dim = c4 * (tau_max + 2)
+        elif pooling == "invpow":
+            self.out_dim = c4 * (tau_max + 2) + c4        # cat(invariant_stats, power)
+        elif pooling in ("metric", "invpow_metric"):
+            self.out_dim = rdim
         else:
             self.out_dim = 2 * c4 if pooling == "hybrid" else c4
 
@@ -112,6 +122,16 @@ class ComplexAMC2(nn.Module):
                                   lam=self.orb_lam) + (1.0 - w) * h.mean(-1)
         if self.pooling == "autocorr":
             return self.invariant_stats(h)               # 精确不变 + 结构保持（B31）
+        if self.pooling == "invpow":                     # 不变双视图：结构 + 幅度
+            pw = torch.complex(torch.sqrt((h.abs() ** 2).mean(dim=-1) + 1e-12),
+                               torch.zeros_like(h.mean(-1).real))
+            return torch.cat([self.invariant_stats(h), pw], dim=-1)
+        if self.pooling in ("metric", "invpow_metric"):
+            # B32：复合不变性 —— 不变统计（实化）[+功率] → 实线性度量头 → L2
+            x = torch.cat([self.invariant_stats(h).real, self.invariant_stats(h).imag], -1)
+            if self.pooling == "invpow_metric":
+                x = torch.cat([x, torch.sqrt((h.abs() ** 2).mean(dim=-1) + 1e-12)], -1)
+            return torch.nn.functional.normalize(self.metric(x), dim=-1)
         if self.pooling == "nopool":
             return h.reshape(h.shape[0], -1)             # 序列拉平（无池化=无相消）
         # gated：门仅依赖 |h|（不变标量）⇒ e = Σ a_t h_t 严格等变
@@ -121,6 +141,24 @@ class ComplexAMC2(nn.Module):
 
     def n_params(self):
         return sum(p.numel() for p in self.parameters())
+
+
+@torch.no_grad()
+def invariance_error(trunk, z, thetas=(np.pi / 4, np.pi / 2, np.pi, 2.0), device="cuda"):
+    """不变证书（B32）：δ_inv = mean_θ ||f(e^{iθ}z) − f(z)|| / ||f(z)||。
+    不变读出（autocorr/metric/...）应给出 float 级 δ_inv≈1e-7（构造性不变）；
+    等变读出（mean/gated/orbit）此处 ≈|1−e^{iθ}|≈1，它们用 equivariance_error。"""
+    with torch.no_grad():
+        zt = torch.as_tensor(z, dtype=torch.complex64, device=device)
+        f0 = trunk(zt)
+        errs = []
+        for th in thetas:
+            rot = torch.as_tensor(np.exp(1j * th), dtype=torch.complex64, device=device)
+            fr = trunk(zt * rot)
+            num = (fr - f0).abs().norm(dim=-1)
+            den = f0.abs().norm(dim=-1).clamp_min(1e-12)
+            errs.append((num / den).mean().item())
+    return float(np.mean(errs))
 
 
 @torch.no_grad()

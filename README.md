@@ -8,9 +8,17 @@ complex-valued observations with per-sample global-phase nuisance
 PhaseMAP-ML (EM with Bessel-closed-form / grid E-step + full marginal-likelihood
 classifier) matches the best of {Euclidean prototype, hard-orbital prototype}
 within 0.5 pt at both sigma_theta -> 0 and sigma_theta -> pi, and BEATS both
-fixed endpoints in the partial-coherence region (sigma_theta = pi/3:
-+1.76 pt, paired Wilcoxon p = 1.1e-156, 2000 paired episodes), while the
+fixed endpoints in the partial-coherence region (sigma_theta = pi/6:
++1.76 pt, paired Wilcoxon p = 1.1e-156, 2000 paired episodes; at sigma_theta =
+pi/3 the same comparison gives only +0.17 pt, p = 5.9e-05), while the
 endpoint envelope collapses by up to 58 pt across the sigma_theta axis.
+
+Scope notes (2026-10-02 audit): the "<=0.5 pt" envelope-matching claim holds
+for k>=5, fade=0 cells; worst cell -0.64 pt (1/36 below -0.5), and 1-shot
+phML is up to 9 pt below euclid at sigma_theta -> 0 (sigma_theta
+unidentifiable, fixed kappa_meta pulls to the orbital endpoint). B5_grid /
+B8_radioml 1-shot phML columns generated before the cls_marginal numerical
+rewrite are chance-level artifacts; use B20_grid.json (post-fix) / rerun.
 
 ## Layout
 - cvfe/synth.py     PhaseFewSyn controllable synthetic episode family

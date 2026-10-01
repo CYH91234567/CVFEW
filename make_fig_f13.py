@@ -109,11 +109,13 @@ ax.axis("off")
 txt = (
     "Basin screening: REFUTED as a protocol\n"
     "────────────────────────────────\n"
-    "vt@800: AUC 0.07-0.16 (at or below chance) — refuted\n"
+    "vt@800: AUC 0.07-0.16 (强反相关但方向跨时点翻转、
+  ≤2SE 不可与随机区分) — 不可部署\n"
     "cancel_ratio@800: AUC 0.86 (SC-S1 pass) but\n"
-    "  median split → 12.5% good rate (SC-S2 fail, = baseline)\n"
+    "  median split → 25% good rate (SC-S2 fail; 基线 12.5%)\n"
     "  ⇒ signal is detectable, not deployable\n\n"
-    "Basin = init × stream (irreducible under any\n"
+    "Basin = init × stream (当前协议下无方向稳定的
+可部署筛选信号\n"
     "train-time observable tested: val level, trajectory-\n"
     "internal val, loss, cancel_ratio, fisher)\n\n"
     "Bimodal structure is robust across 28 runs:\n"

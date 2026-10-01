@@ -32,7 +32,6 @@ def _cond_worker(job):
         # P7 判定用配对：canon_ref vs orbital / canon_max vs canon_ref
         r["p7_canonref_vs_orbital"] = R.paired_test(n_ok["canon_ref"], n_ok["orbital"])
         r["p7_canonmax_vs_canonref"] = R.paired_test(n_ok["canon_max"], n_ok["canon_ref"])
-    r.pop("per_episode_b64", None)
     return r
 
 

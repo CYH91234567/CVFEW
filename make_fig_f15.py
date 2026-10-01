@@ -48,7 +48,7 @@ def main():
                                                         rotation=25, ha="right", fontsize=8)
     ax.set_ylabel("valsel 三头均值 (%)")
     ax.set_title("(a) 逐 init 分布：autocorr 均值最高且方差腰斩\n"
-                 "（μ 82.9→85.8，σ 10.3→5.4；min 67.3→71.1）", fontsize=9)
+                 "（μ 82.9→85.8，σ 10.3→5.4；min 67.3→71.8）", fontsize=9)
     ax.legend(fontsize=7, loc="lower left")
 
     ax = axes[1]
