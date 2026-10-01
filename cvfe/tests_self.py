@@ -253,12 +253,14 @@ def t9_orbit_pool_equivariance(seed=0):
 
 
 def _invariant_stats_np(h, tau_max=6):
-    """invariant_stats 的 numpy 镜像（性质与实现无关）。"""
+    """invariant_stats 的 numpy 镜像（量纲无关版；性质与实现无关）。"""
     L = h.shape[-1]
-    feats = [(h[..., tau:] * np.conj(h[..., : L - tau])).mean(-1)
-             for tau in range(1, tau_max + 1)]
     a2 = np.abs(h) ** 2
-    feats += [a2.mean(-1), (a2 ** 2).mean(-1)]
+    m2 = np.maximum(a2.mean(-1), 1e-12)
+    feats = [((h[..., tau:] * np.conj(h[..., : L - tau])).mean(-1) / m2)
+             for tau in range(1, tau_max + 1)]
+    feats.append((a2 ** 2).mean(-1) / m2 ** 2)          # κ
+    feats.append(np.log(m2))                            # log 能量
     return np.stack(feats, axis=-1)
 
 
@@ -281,14 +283,12 @@ def t10_invariant_stats(seed=0):
     base = np.abs(_invariant_stats_np(h)).max()
     check("T10b autocorr preserves phase-structure (CFO ramp changes features)",
           d > 0.05 * base, f"rel_change={d/base:.3f}")
-    # T10c：幅度缩放按齐次性缩放统计量（R(τ)/m2 二次、m4 四次），相位不受污染
+    # T10c：量纲无关版对纯幅度缩放精确不变（log m2 平移 log4，单独扣除）
     hs = h * 2.0
     e_s = _invariant_stats_np(hs)
-    scale = np.ones_like(e0)          # 前 tau_max+1 项二次、最后 m4 四次
-    scale[..., -1] = 16.0
-    scale[..., :-1] = 4.0
-    check("T10c amplitude scaling follows degree homogeneity",
-          float(np.abs(e_s - scale * e0).max() / np.abs(e0).max()) < 1e-12)
+    e_s[..., -1] -= np.log(4.0)
+    check("T10c scale-free stats invariant to amplitude scaling",
+          float(np.abs(e_s - e0).max() / max(np.abs(e0).max(), 1e-9)) < 1e-12)
 
 
 if __name__ == "__main__":

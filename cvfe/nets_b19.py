@@ -64,21 +64,26 @@ class ComplexAMC2(nn.Module):
             self.out_dim = 2 * c4 if pooling == "hybrid" else c4
 
     def invariant_stats(self, h):
-        """不变结构读出（B31）：对全局相位精确不变、保留时间相位结构。
+        """不变结构读出（B31，量纲无关版）：全局相位精确不变 + 保留时间相位结构。
 
-        R_c(τ) = mean_t h_c(t+τ)·conj(h_c(t))  ——相位差统计（自相关⇒频谱结构）
-        m2_c = mean_t|h_c(t)|², m4_c = mean_t|h_c(t)|⁴ ——高阶矩（星座密度）
-        全部满足 h→e^{iθ}h 时不变（相位差/模值均不受影响）⇒ 嵌入精确不变（非等变），
-        无相干求和 ⇒ 无相消；不对齐时间相位 ⇒ 保信息（B30 命题二分法的正解）。
+        R̂_c(τ) = R_c(τ)/m2  ——归一化自相关：|R̂|≤1，相位 = 每样本平均相移
+        κ_c = m4/m2²        ——归一化峭度（星座密度/阶数，经典 AMC 累量特征）
+        log m2_c            ——绝对能量/SNR 层信息
+        m2_c = mean_t|h_c|²，m4_c = mean_t|h_c|⁴。全部满足 h→e^{iθ}h 不变
+        （相位差与模值不受影响）⇒ 嵌入精确不变（非等变）；无相干求和 ⇒ 无相消；
+        不对齐时间相位 ⇒ 保信息（B30 命题二分法的正解）。
+        量纲归一化防止 m4（|h|⁴ 量级）主导范数、压没 R̂(τ) 信息。
         h:(B,C,L) -> (B, C*(tau_max+2)) complex。
         """
         L = h.shape[-1]
+        a2 = h.abs() ** 2
+        m2 = a2.mean(-1).clamp_min(1e-12)
         feats = []
         for tau in range(1, self.tau_max + 1):
-            feats.append((h[..., tau:] * h[..., : L - tau].conj()).mean(-1))
-        a2 = h.abs() ** 2
-        feats.append(a2.mean(-1))                        # m2（实数进复向量实部）
-        feats.append((a2 ** 2).mean(-1))                 # m4
+            r = (h[..., tau:] * h[..., : L - tau].conj()).mean(-1)
+            feats.append(r / m2)                              # R̂(τ)（O(1) 复值）
+        feats.append((a2 ** 2).mean(-1) / (m2 ** 2))          # κ（O(1) 实值）
+        feats.append(torch.log(m2))                           # log 能量
         return torch.cat(feats, dim=-1)
 
     def hidden(self, z):                       # (B,L) complex -> (B,c4,L16)

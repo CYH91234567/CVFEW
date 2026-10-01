@@ -3,16 +3,20 @@ DIRS = {"orbit": "/tmp/cvfe_work/res_orbit/logs/B30_orbit_pool.json",
         "hybrid": "/tmp/cvfe_work/res_hybrid/logs/B30_orbit_pool.json",
         "gated": "/tmp/cvfe_work/res_gated/logs/B30_orbit_pool.json",
         "orbitL0.3": "/tmp/cvfe_work/res_orb03/logs/B30_orbit_pool.json",
-        "learnlam": "/tmp/cvfe_work/res_learnlam/logs/B30_orbit_pool.json"}
+        "learnlam": "/tmp/cvfe_work/res_learnlam/logs/B30_orbit_pool.json",
+        "B31-autocorr": "/tmp/cvfe_work/res_auto/logs/B30_orbit_pool.json",
+        "B31-nopool": "/tmp/cvfe_work/res_nopool/logs/B30_orbit_pool.json",
+        "B31-power": "/tmp/cvfe_work/res_power31/logs/B30_orbit_pool.json"}
 for name, p in DIRS.items():
     if os.path.exists(p):
         d = json.load(open(p))
         runs = d["runs"]
+        head = "euclid" if ("auto" in name or "power" in name) else "orbital"
         vals = []
         for k, v in runs.items():
             e = v["eval"].get("valsel")
             if e:
-                vals.append(round(100 * sum(e[f"sigma_{s:.2f}"]["orbital"] for s in
+                vals.append(round(100 * sum(e[f"sigma_{s:.2f}"][head] for s in
                                             (0.0, 1.0471975511965976, 3.141592653589793)) / 3, 1))
         print(f"{name:10s} n={len(runs):2d} valsel={vals}")
     else:
