@@ -43,6 +43,26 @@ class AmcCNN(nn.Module):
         return self.net(x).squeeze(-1)          # (B,128)
 
 
+class AmcCLDNN(nn.Module):
+    """CLDNN（Conv1D → LSTM → FC）：AMC 标杆混合架构（Ramjee et al. 2019
+    arXiv:1901.05850 比较骨架；原始 CLDNN 概念属 O'Shea 等的 CNN+LSTM+DNN）。
+    与 AmcCNN 同接口 (B,L) complex → (B,128)，引入时序递归家族差异。"""
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(2, 32, 7, padding=3), nn.BatchNorm1d(32), nn.ReLU(), nn.MaxPool1d(2),
+            nn.Conv1d(32, 64, 5, padding=2), nn.BatchNorm1d(64), nn.ReLU(), nn.MaxPool1d(2),
+        )
+        self.lstm = nn.LSTM(64, 64, batch_first=True)
+        self.fc = nn.Linear(64, 128)
+
+    def forward(self, z):                       # (B,L) complex
+        x = torch.stack([z.real, z.imag], dim=1)
+        h = self.conv(x)                        # (B,64,L/4)
+        out, _ = self.lstm(h.transpose(1, 2))   # (B,L/4,64)
+        return self.fc(out[:, -1, :])           # (B,128)
+
+
 def proto_train(trunk, sampler, n_episodes, mode, device=DEV, bs=8, lr=1e-3):
     """端到端原型训练。mode: plain | aug(随机相位旋转)。"""
     opt = torch.optim.AdamW(trunk.parameters(), lr=lr, weight_decay=1e-4)
@@ -116,8 +136,10 @@ def main():
         cnns = {}
         for b in budgets:
             cnns[b] = {"plain": proto_train(AmcCNN().to(DEV), smp_tr, b, "plain"),
-                       "aug": proto_train(AmcCNN().to(DEV), smp_tr, b, "aug")}
-            print(f"  trained budget={b}", flush=True)
+                       "aug": proto_train(AmcCNN().to(DEV), smp_tr, b, "aug"),
+                       "cldnn": proto_train(AmcCLDNN().to(DEV), smp_tr, b, "plain"),
+                       "cldnn_aug": proto_train(AmcCLDNN().to(DEV), smp_tr, b, "aug")}
+            print(f"  trained budget={b} (cnn/cnn-aug/cldnn/cldnn-aug)", flush=True)
         for sl in snr_levels:
             for mode, strength in inj_grid:
                 smp_te = EpisodeSampler(zn, y, snr, classes=sp["test"], n_way=3, k_shot=5,
@@ -131,7 +153,9 @@ def main():
                 # SOTA-1/2：端到端ProtoNet-CNN（3-way读出）
                 for b, nets in cnns.items():
                     for tag, net in [("sota_protonet_cnn", nets["plain"]),
-                                     ("sota_protonet_cnn_aug", nets["aug"])]:
+                                     ("sota_protonet_cnn_aug", nets["aug"]),
+                                     ("sota_protonet_cldnn", nets["cldnn"]),
+                                     ("sota_protonet_cldnn_aug", nets["cldnn_aug"])]:
                         name = f"{tag}_b{b}" if len(budgets) > 1 else tag
                         es = embed(net, Zs).astype(np.float64)      # (B,N,k,C)
                         eq = embed(net, Zq).astype(np.float64)      # (B,m,C)

@@ -61,7 +61,10 @@ out = {"n_runs": len(runs), "good_basin_n": int(good.sum()),
        "vt_at_800_per_run": {k: dict((d["it"], d) for d in runs[k]["info"]["diag"])
                              .get(800, {}).get("vt") for k in keys},
        "valsel_per_run": {k: hm(v) for k, v in runs.items()},
-       "cancel_endpoint_per_run": {k: out_c for k, out_c in zip(keys, cr_end)},
+       # 2026-10-03 审计轮修复：原为 zip(keys, cr_end)，keys=sorted 而 cr_end 按插入序，
+       # 导致 16 项中 12 项键值错配（verdict 内部与 cancel_endpoint_auc 矛盾）。
+       # cr_end 本身按 order（插入序）取值正确，改为按键查找。
+       "cancel_endpoint_per_run": {k: runs[k]["info"]["cancel_endpoint"] for k in keys},
        "bimodal": None}
 
 verdict = {}

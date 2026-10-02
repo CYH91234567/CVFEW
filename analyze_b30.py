@@ -37,7 +37,9 @@ def sigma_spread(v, sel="valsel"):
 
 
 def stats(runs, sel="valsel"):
-    vs = np.array([acc(v) for v in runs.values() if acc(v, sel) is not None], float)
+    # 2026-10-03 审计轮修复：原为 acc(v)（默认 valsel），导致 endpoint/ema 块逐位
+    # 复制 valsel；过滤条件用的是 acc(v, sel)，取值必须同口径。
+    vs = np.array([acc(v, sel) for v in runs.values() if acc(v, sel) is not None], float)
     good = vs >= 93
     return {"n": int(len(vs)), "mean": float(vs.mean()) if len(vs) else None,
             "sd": float(vs.std(ddof=1)) if len(vs) > 1 else None,
@@ -95,9 +97,13 @@ def main():
                                 for a, r in arms.items() if r},
            "sigma_spread_max": {a: max((sigma_spread(v) or 0) for v in r.values())
                                 for a, r in arms.items() if r},
+           # 2026-10-03 审计轮修复：gamma_mag 在 eval[sel] 下，原路径少套一层选点
+           # （旧产物该字段全臂 NaN）；改用与 _gamma_mag 一致的路径。
            "gamma_mag_mean": {
-               a: float(np.mean([v["eval"].get("sigma_0.00", {}).get("gamma_mag", np.nan)
-                                 for v in r.values()])) for a, r in arms.items() if r}}
+               a: float(np.mean([g for g in (_gamma_mag(v) for v in r.values())
+                                 if g is not None])) if any(_gamma_mag(v) is not None
+                                                            for v in r.values()) else None
+               for a, r in arms.items() if r}}
     # 判据（全部由本脚本计算落盘）
     st_o = out["stats"]["orbit"]["valsel"]
     st_h = out["stats"]["hybrid"]["valsel"]

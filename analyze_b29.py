@@ -82,7 +82,9 @@ if pairs:
         t = np.mean(diffs) / (np.std(diffs, ddof=1) / np.sqrt(len(diffs)))
         from scipy import stats
         out["aug_t"] = float(t)
-        out["aug_p"] = float(2 * stats.ttest_1samp(diffs, 0).pvalue)
+        # ttest_1samp 默认 alternative='two-sided'，其 pvalue 已是双侧 p 值，
+        # 不可再乘 2（2026-10-03 审计轮修复：旧代码产出非法 aug_p=1.14>1）。
+        out["aug_p"] = float(stats.ttest_1samp(diffs, 0).pvalue)
     verdict["SC_AUG"] = ("enhancement" if out["aug_mean_diff"] > 1.0
                          else "no_gain" if abs(out["aug_mean_diff"]) <= 1.0
                          else "harmful")

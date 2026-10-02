@@ -11,7 +11,8 @@ PhaseMAP：类条件 wrapped-normal 相位先验边际化的 EM（P2(ii) Bessel 
   M步: mu = sum_j w_j gamma_j z_j / sum_j w_j ;  sigma^2 由期望残差更新
   极限自检: sigma_th->0 => gamma->1（欧氏均值）; sigma_th->inf, rho 大 => 硬对齐轨道。
   数值：ive(n,x)=I_n(x)e^{-x}，c_0/c_1 同用 ive（公因子 e^{rho} 相消）；
-        rho>40 时后验由似然主导，用渐近 gamma = e^{-i psi} * I_1/I_0。
+        运行时 E 步用 _gamma_grid 的平移稳定周期网格求积（rho 截断 700 以防溢出，
+        大 rho 失真有界 <6e-4）；Bessel 闭式 _gamma_posterior 仅作交叉验证。
 """
 import numpy as np
 from scipy.special import ive
@@ -464,7 +465,8 @@ def cls_orbital(Zq, mu, aux=None, uncertainty=False):
 
 def cls_marginal_legacy(Zq, mu, aux, n_grid=128):
     """（旧实现，仅用于回归核对，不得进入新主张）
-    原写法在低 σ²（学习到的嵌入）下会因 ρ 被 cap 到 700 而破坏二次项相消，退化到随机。"""
+    原写法在低 σ²（学习到的嵌入）下会因 ρ 被 cap 到 700 而破坏二次项相消，
+    明显劣化（独立补测：94.7% vs 重写版 100%）；完全退化到机会水平需更极端 σ²。"""
     th = np.linspace(-np.pi, np.pi, n_grid, endpoint=False)
     st = aux["sigma_th"]
     uth = np.unique(np.round(st, 6))

@@ -54,17 +54,20 @@ def main():
         run_cell(Zs, Zq, yq, st, unit=False, tag=f"synth σ={st:.2f}")
 
     if not os.path.exists(CACHE):
-        print("\n[skip A] 无 RadioML 缓存"); return
-    print("\n=== A：真实 IQ identity 特征（旧实现有效区）===")
-    z, y, snr = D.load_radioml(CACHE)
-    zn = D.energy_normalize(z).astype(np.complex64)
-    splits = episodes.make_class_splits(n_splits=1)
-    sp = splits[0]
-    for st in [0.0, np.pi / 3, np.pi]:
-        smp = episodes.EpisodeSampler(zn, y, snr, classes=sp["test"], n_way=3, k_shot=5,
-                                      q_per_class=15, seed=900, snr_min=6, snr_max=18)
-        Zs, Zq, yq = smp.sample(150, inject=None if st == 0 else ("global", st))
-        run_cell(Zs, Zq, yq, st, unit=False, tag=f"iq σ={st:.2f}")
+        # 2026-10-03 审计轮修复：原为 return，导致 C 段（重写的核心动机：崩塌区）
+        # 在无 cache 机器上永不执行；A 段依赖 cache，只跳过 A 段。
+        print("\n[skip A] 无 RadioML 缓存")
+    else:
+        print("\n=== A：真实 IQ identity 特征（旧实现有效区）===")
+        z, y, snr = D.load_radioml(CACHE)
+        zn = D.energy_normalize(z).astype(np.complex64)
+        splits = episodes.make_class_splits(n_splits=1)
+        sp = splits[0]
+        for st in [0.0, np.pi / 3, np.pi]:
+            smp = episodes.EpisodeSampler(zn, y, snr, classes=sp["test"], n_way=3, k_shot=5,
+                                          q_per_class=15, seed=900, snr_min=6, snr_max=18)
+            Zs, Zq, yq = smp.sample(150, inject=None if st == 0 else ("global", st))
+            run_cell(Zs, Zq, yq, st, unit=False, tag=f"iq σ={st:.2f}")
 
     print("\n=== C：学习到的嵌入风格（单位化、支持集高度一致 ⇒ σ² 极小）===")
     rng = np.random.RandomState(3)

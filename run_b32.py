@@ -33,7 +33,7 @@ torch.use_deterministic_algorithms(True, warn_only=True)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cvfe import data as D, estim as E
-from cvfe.episodes import EpisodeSampler, make_class_splits
+from cvfe.episodes import EpisodeSampler, make_class_splits, MOD_CLASSES
 from cvfe.nets_b17 import unit_norm, equivariance_error
 from cvfe.nets_b19 import ComplexAMC2, cancellation_ratio, invariance_error
 from run_b19 import l1pca_proto, embed, heads_on, cnorm
@@ -166,11 +166,17 @@ def main():
     ap.add_argument("--epi-eval", type=int, default=500)
     ap.add_argument("--arms", default="metric,invpow,invpow_metric")
     ap.add_argument("--budget", type=int, default=3200)
+    ap.add_argument("--split-seed", type=int, default=20260929,
+                    help="类划分随机种子；默认沿用 B32 原值")
+    ap.add_argument("--split-idx", type=int, default=0,
+                    help="划分序号（在该 seed 生成的第几个划分中取 test/val/train）")
+    ap.add_argument("--n-inits", type=int, default=16,
+                    help="跑 INIT_SEEDS 的前 N 个（B33 分划分验证用 8）")
     a = ap.parse_args()
     os.makedirs(os.path.join(a.out, "logs"), exist_ok=True)
     z, y, snr = D.load_radioml(a.cache)
     zn = D.energy_normalize(z).astype(np.complex64)
-    sp = make_class_splits(n_splits=1)[0]
+    sp = make_class_splits(n_splits=a.split_idx + 1, seed=a.split_seed)[a.split_idx]
 
     arms = a.arms.split(",")
     if a.mode == "smoke":
@@ -184,7 +190,11 @@ def main():
             oname += ".json"
         res_path = os.path.join(a.out, "logs", oname)
         recs = {"meta": {"prereg": "PREREG_B32.md (B32-A 复合不变性)", "arm": arm,
-                         "budget": budget, "inits": list(INIT_SEEDS), "stream_seed": 4000,
+                         "budget": budget, "inits": list(INIT_SEEDS[:a.n_inits]),
+                         "n_inits": a.n_inits,
+                         "split_seed": a.split_seed, "split_idx": a.split_idx,
+                         "split_test_classes": [MOD_CLASSES[c] for c in sp["test"]],
+                         "stream_seed": 4000,
                          "eval": "sigma-paired (same base episodes across sigma)",
                          "disjoint": True, "deterministic": True,
                          "protocol": "B29c/B29d/B30/B31 identical"}, "runs": {}}
@@ -194,7 +204,7 @@ def main():
             recs["meta"] = old.get("meta", recs["meta"])
             print(f"[resume] {res_path}: {len(recs['runs'])} done", flush=True)
         t00 = time.time()
-        for i0 in INIT_SEEDS:
+        for i0 in INIT_SEEDS[:a.n_inits]:
             key = f"{arm}_i{i0}"
             if key in recs["runs"]:
                 print(f"[skip] {key}", flush=True)
