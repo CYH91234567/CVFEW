@@ -12,7 +12,7 @@ import json
 import statistics as st
 from pathlib import Path
 
-LOGS = Path(r"D:/个人/CVCNN/CVFEW/04_results/logs")
+LOGS = Path(__file__).resolve().parents[1] / "04_results" / "logs"
 SRC = LOGS / "B29_sca_v2.json"
 d = json.loads(SRC.read_text())
 runs = d["runs"]
@@ -105,7 +105,7 @@ lines.append(f"run-to-run spread (sd {summary['valsel']['sd_pct']:.2f} pt over 9
              "across 3 inits x 3 streams),")
 lines.append("so the paper states 'on par' rather than 'better', which is the honest")
 lines.append("reading of the paired evidence.")
-Path(r"D:/个人/CVCNN/CVFEW/04_results/tables/T27_real_control.md").write_text("\n".join(lines))
+(Path(__file__).resolve().parents[1] / "04_results" / "tables" / "T27_real_control.md").write_text("\n".join(lines))
 print(json.dumps(summary, indent=1))
 print("params:", runs[ks[0]]["params"])
 print("wrote T27_real_control.md + real_control_row.json")

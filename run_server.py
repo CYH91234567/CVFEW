@@ -5,15 +5,36 @@
   python run_server.py run "<命令>"           # 远程执行（流式输出）
   python run_server.py fetch                  # 回传结果到本机 04_results
   python run_server.py clean                  # 删除服务器上全部项目文件
+
+【凭据纪律】连接参数一律从环境变量 CVFE_HOST/CVFE_PORT/CVFE_USER/CVFE_PWD
+读取；本地的 servercreds.py（git 忽略）作为开发回退。凭据不得进入版本库
+（历史教训：明文凭据曾随首个 commit 推送到公开仓并泄露，见 HANDOFF 警示条目）。
 """
 import os, sys, stat
 import paramiko
 
-HOST, PORT, USER, PWD = "10.12.149.56", 52512, "kjds512", "100029"
 LOCAL_CODE = os.path.dirname(os.path.abspath(__file__))
 REMOTE = "/tmp/cvfe_work/code"
 LOCAL_RES = os.path.abspath(os.path.join(LOCAL_CODE, "..", "04_results"))
 PYBIN = "/home/kjds512/anaconda3/envs/msb/bin/python"
+
+
+def _cred(name, env):
+    v = os.environ.get(env)
+    if v:
+        return v
+    try:
+        from servercreds import CREDS  # 本地未跟踪回退（.gitignore）
+        return CREDS[name]
+    except ImportError:
+        raise SystemExit(
+            f"服务器凭据缺失：请设环境变量 {env} 或提供本地 servercreds.py（见模块文档）")
+
+
+HOST = _cred("host", "CVFE_HOST")
+PORT = int(_cred("port", "CVFE_PORT"))
+USER = _cred("user", "CVFE_USER")
+PWD = _cred("pwd", "CVFE_PWD")
 
 
 def connect():
@@ -35,7 +56,9 @@ def upload(c):
     for f in os.listdir(os.path.join(LOCAL_CODE, "cvfe")):
         if f.endswith(".py"):
             files.append((os.path.join(LOCAL_CODE, "cvfe", f), f"{REMOTE}/cvfe/{f}"))
-    cache = r"D:\个人\CVCNN\CVXAI\04_results_from_server\radioml_cache.npz"
+    cache = os.environ.get("CVFE_CACHE",
+                           os.path.join(LOCAL_CODE, "..", "..", "CVXAI",
+                                        "04_results_from_server", "radioml_cache.npz"))
     files.append((cache, f"{REMOTE}/radioml_cache.npz"))
     for lp, rp in files:
         sftp.put(lp, rp)

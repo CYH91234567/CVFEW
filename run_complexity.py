@@ -20,7 +20,7 @@ import numpy as np
 import cvfe.estim as E
 import cvfe.synth as S
 
-LOGS = Path(r"D:/个人/CVCNN/CVFEW/04_results/logs")
+LOGS = Path(__file__).resolve().parents[1] / "04_results" / "logs"
 K, k, p, rho, sigma, st, EPISODES = 5, 5, 64, 0.3, 0.3, np.pi / 3, 200
 
 rng = np.random.default_rng(20261003)

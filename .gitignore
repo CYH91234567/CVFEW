@@ -1,1 +1,4 @@
 __pycache__/
+servercreds.py
+*.log
+smoketest/

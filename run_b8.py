@@ -9,6 +9,7 @@
 方法: euclid, orbital, tta_euclid, circcoord, whiten, drop_agc,
       phasemap, phasemap_ml, phasemap_w（9 个）
 """
+import os
 import argparse, json, os, sys, time, zlib
 import numpy as np
 
@@ -67,7 +68,12 @@ def _worker_b8(job):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cache", default=r"D:\个人\CVCNN\CVXAI\04_results_from_server\radioml_cache.npz")
+    ap.add_argument("--cache",
+                default=os.environ.get(
+                    "RML2016_10A_CACHE",
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "..", "04_results", "local_b10a",
+                                 "radioml_cache.npz")))
     ap.add_argument("--out", default=None)
     ap.add_argument("--epi", type=int, default=600)
     ap.add_argument("--workers", type=int, default=6)

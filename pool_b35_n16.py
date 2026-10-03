@@ -63,7 +63,8 @@ def paired(a, b):
 
 def main():
     arms = {}
-    for tag, fn in (("b35", "B35_{arm}.json"), ("b35b", "B35b_{arm}.json")):
+    for tag, fn in (("b35", "B35_{arm}.json"), ("b35b", "B35b_{arm}.json"),
+                    ("b35c", "B35c_{arm}.json")):
         for arm in ("real", "midres"):
             r = load(fn.format(arm=arm))
             if r:
@@ -71,8 +72,10 @@ def main():
                 if acc:
                     arms[(tag, arm)] = acc
                     print(f"{tag}/{arm}: {len(acc)} runs")
-    real = {**arms.get(("b35", "real"), {}), **arms.get(("b35b", "real"), {})}
-    mid = {**arms.get(("b35", "midres"), {}), **arms.get(("b35b", "midres"), {})}
+    real = {**arms.get(("b35", "real"), {}), **arms.get(("b35b", "real"), {}),
+            **arms.get(("b35c", "real"), {})}
+    mid = {**arms.get(("b35", "midres"), {}), **arms.get(("b35b", "midres"), {}),
+           **arms.get(("b35c", "midres"), {})}
     # 按 init 对齐：real_i47 ↔ midres_i47
     pairs_real, pairs_mid = {}, {}
     for k in real:
@@ -81,9 +84,10 @@ def main():
     for k in mid:
         i = k.split("_i")[1] if "_i" in k else k
         pairs_mid[i] = mid[k]
-    common = sorted(set(pairs_real) & set(pairs_mid))
+    common = signed = sorted(set(pairs_real) & set(pairs_mid))
     print(f"paired inits: {len(common)}")
-    par = paired(pairs_real, pairs_mid)
+    # paired(a, b) 计算 a−b；此处要求 midres−real（与 B35 verdict 同符号约定）
+    par = paired(pairs_mid, pairs_real)
     out = {"n_pooled": len(common), "inits": common,
            "midres_minus_real_pooled": par,
            "mean_real": float(np.mean([pairs_real[i] for i in common])),

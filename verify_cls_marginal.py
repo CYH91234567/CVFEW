@@ -13,7 +13,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cvfe import data as D, estim as E, synth, episodes
 from cvfe.estim import cls_marginal_legacy
 
-CACHE = r"D:\个人\CVCNN\CVXAI\04_results_from_server\radioml_cache.npz"
+CACHE = os.environ.get(
+    "RML2016_10A_CACHE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "04_results",
+                 "local_b10a", "radioml_cache.npz"))
 
 
 def acc(pred, yq):

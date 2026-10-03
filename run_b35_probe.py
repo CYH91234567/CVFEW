@@ -34,6 +34,7 @@ natural extension"；B33 显示 split-B（8PSK/CPFSK/QAM64）上 0/8 好盆 = �
 import json
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 from scipy.stats import wilcoxon
@@ -41,8 +42,8 @@ from scipy.stats import wilcoxon
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cvfe.episodes import EpisodeSampler  # noqa: E402
 
-CACHE = "D:/个人/CVCNN/CVFEW/04_results/local_b10b/cache_b10b.npz"
-OUT = "D:/个人/CVCNN/CVFEW/04_results/logs/B35_probe.json"
+CACHE = str(Path(__file__).resolve().parents[1] / "04_results" / "local_b10b" / "cache_b10b.npz")
+OUT = str(Path(__file__).resolve().parents[1] / "04_results" / "logs" / "B35_probe.json")
 
 SPLIT_B = [0, 3, 7]     # 8PSK, CPFSK, QAM64（10b 编号与 10a 一致）
 SPLIT_0 = [1, 6, 8]     # AM-DSB, QAM16, QPSK

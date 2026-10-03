@@ -7,6 +7,7 @@ D1 相消比 ρ_c = |mean_t h_c| / mean_t|h_c|（末层隐层，逐通道）
 D2 均值池化嵌入的 Fisher 判别比 + orbital 头 5-way 精度（≈chance 预测）
 D3 功率池化嵌入的 Fisher 判别比 + euclid 头精度（对照，预测显著更高）
 """
+import os
 import json, os, sys, time
 import numpy as np
 
@@ -14,7 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cvfe import data as D
 from cvfe.episodes import EpisodeSampler
 
-CACHE = r"D:\个人\CVCNN\CVXAI\04_results_from_server\radioml_cache.npz"
+CACHE = os.environ.get(
+    "RML2016_10A_CACHE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "04_results",
+                 "local_b10a", "radioml_cache.npz"))
 CH = (32, 64, 128, 32)
 KS = [7, 5, 3, 3]
 

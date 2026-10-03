@@ -25,7 +25,7 @@ from pathlib import Path
 from scipy.stats import norm
 
 RNG = np.random.default_rng(20261003)
-LOGS = Path(r"D:/个人/CVCNN/CVFEW/04_results/logs")
+LOGS = Path(__file__).resolve().parents[1] / "04_results" / "logs"
 LOGS.mkdir(parents=True, exist_ok=True)
 
 

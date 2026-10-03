@@ -21,9 +21,9 @@ while True:
         for d in ("res_orbit", "res_hybrid", "res_gated"):
             ci, co, ce = c.exec_command(
                 "test -f /tmp/cvfe_work/%s/logs/B30_orbit_pool.json && "
-                "/home/kjds512/anaconda3/envs/msb/bin/python -c "
+                "%s -c "
                 "\"import json;print(len(json.load(open('/tmp/cvfe_work/%s/logs/B30_orbit_pool.json'))['runs']))\" "
-                "|| echo 0" % (d, d))
+                "|| echo 0" % (d, run_server.PYBIN, d))
             status["counts"][d] = int(co.read().decode().strip().split("\n")[0] or 0)
         c.close()
     except Exception as e:

@@ -3,7 +3,7 @@ learnlam，各独立 --out 目录），全部进程退出后落盘状态并退�
 退出码 0=全部完成（每臂 16 runs）；1=进程消失但 runs 不足；2=超时（14h）。
 """
 import json, sys, time
-sys.path.insert(0, "C:/个人/CVCNN/CVFEW/03_code")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import warnings
 warnings.filterwarnings("ignore")
 import run_server
@@ -21,9 +21,9 @@ while True:
         for d, name in ARMS:
             ci, co, ce = c.exec_command(
                 "test -f /tmp/cvfe_work/%s/logs/B30_orbit_pool.json && "
-                "/home/kjds512/anaconda3/envs/msb/bin/python -c "
+                "%s -c "
                 "\"import json;d=json.load(open('/tmp/cvfe_work/%s/logs/B30_orbit_pool.json'));"
-                "print(len(d['runs']))\" || echo 0" % (d, d))
+                "print(len(d['runs']))\" || echo 0" % (d, run_server.PYBIN, d))
             status["counts"][name] = int(co.read().decode().strip().split("\n")[0] or 0)
         c.close()
     except Exception as e:
