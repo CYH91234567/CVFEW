@@ -597,10 +597,16 @@ def run_method(name, Zs, Zq, mu_true=None, kappa_meta=None, sigma_th_oracle=None
     if name.startswith("canonQ_"):                # 支持侧轨道对齐 + 查询侧选截面
         rule = name.split("_", 1)[1]
         if rule == "ref":                         # 查询侧按支持集二阶矩参考轴规范化
+            # A-J9 分发修复（2026-10-04）：原实现 mu = proto_canon_ref(Zs) 与
+            # canon_ref 的支持侧逐字重复（分发 bug，B20/T11 已披露）。按 B18
+            # 的定义，canonQ_ref 的支持侧应为**轨道原型**（估计层免截面），再与
+            # 查询侧一起规范化进同一参考帧后做欧氏比较：
             v = canon_ref_vec(Zs)
-            mu = proto_canon_ref(Zs)
-            Zqc = canon_apply_ref(Zq, v)
-            return (np.abs(Zqc[:, :, None, :] - mu[:, None, :, :]) ** 2).sum(-1).argmin(-1), {}
+            mu_orb = proto_orbital(Zs)            # 支持侧：轨道对齐（免截面估计）
+            mu_c = canon_apply_ref(mu_orb, v)     # 原型进参考帧
+            Zqc = canon_apply_ref(Zq, v)          # 查询侧：参考规范化（付查询侧割迹代价）
+            return ((np.abs(Zqc[:, :, None, :] - mu_c[:, None, :, :]) ** 2).sum(-1)
+                    .argmin(-1), {})
         return cls_canon(Zq, proto_orbital(Zs), rule=rule), {}
     if name == "canon_ref":                       # MRA 标准：二阶矩主方向规范化
         v = canon_ref_vec(Zs)

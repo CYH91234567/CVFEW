@@ -165,6 +165,8 @@ def main():
     ap.add_argument("--split-idx", type=int, default=1)
     ap.add_argument("--n-inits", type=int, default=8,
                     help="B33 协议 n=8；init 集 INIT_SEEDS 前 8")
+    ap.add_argument("--init-offset", type=int, default=0,
+                    help="init 切片偏移（n=16 扩展用 offset=8 跑后 8 个 init）")
     a = ap.parse_args()
     os.makedirs(os.path.join(a.out, "logs"), exist_ok=True)
     z, y, snr = D.load_radioml(a.cache)
@@ -181,7 +183,7 @@ def main():
         res_path = os.path.join(a.out, "logs", f"B35_{arm}.json")
         recs = {"meta": {"prereg": "PREREG_B35.md (split-B 攻坚 + real 对照 + 中分辨率)",
                          "arm": arm, "budget": budget,
-                         "inits": list(INIT_SEEDS[:a.n_inits]),
+                         "inits": list(INIT_SEEDS[a.init_offset:a.init_offset + a.n_inits]),
                          "n_inits": a.n_inits,
                          "split_seed": a.split_seed, "split_idx": a.split_idx,
                          "split_test_classes": [MOD_CLASSES[c] for c in sp["test"]],
@@ -196,7 +198,7 @@ def main():
             recs["runs"].update(old.get("runs", {}))
             recs["meta"] = old.get("meta", recs["meta"])
             print(f"[resume] {res_path}: {len(recs['runs'])} done", flush=True)
-        for i0 in INIT_SEEDS[:a.n_inits]:
+        for i0 in INIT_SEEDS[a.init_offset:a.init_offset + a.n_inits]:
             key = f"{arm}_i{i0}"
             if key in recs["runs"]:
                 print(f"[skip] {key}", flush=True)

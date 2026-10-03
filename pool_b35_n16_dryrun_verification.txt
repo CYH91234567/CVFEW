@@ -1,0 +1,28 @@
+B35 n=16 池化脚本 dry-run 验证记录（2026-10-03/04，gap 文档 B-J4 收尾前置）
+
+状态：B35b（init offset 8 的 8 个新 init，real/midres 两臂）仍在服务器
+（/tmp/cvfe_work/res_b35ext 与 res_b35extmid）未回传 —— 本轮会话开始时
+TCP 52512 超时（filter 状态），ICMP 亦不可达。恢复后先 tail 服务器日志确认
+两个 nohup 进程（real: PID 1078628；midres: PID 1078895，若存活）是否已完成，
+再回传两个目录的 logs/B35_{real,midres}.json → 本地存为
+B35b_real.json / B35b_midres.json，然后运行 pool_b35_n16.py。
+
+本轮修复（pool_b35_n16.py 的 valsel/paired 两函数）：
+- 原版 valsel 解析路径错误（在 ev 层找 "0.0" 等字符串键）→ 全 NaN；
+  B35b 落地后若直接运行会产出无意义结果。
+- 修复后按 analyze_b35.py 同口径解析：
+  runs[k]["eval"]["valsel"][f"sigma_{s:.2f}"]["euclid"]，SIG=(0, 1.0471976, π)，
+  百分比均值，键按 init（k.split("_i")[-1]）归一。
+- paired 单位一致性修正（valsel 已 ×100，paired 不再 ×100）。
+
+Dry-run 验证（仅 n=8 原数据，B35b 缺失）：
+midres − real = +2.4319 pt（论文 +2.43 ✓）、胜率 7/8（0.875，论文 7/8 ✓）、
+Wilcoxon p = 0.0546875（论文 p = 0.055 ✓）。口径与已发表数字逐位一致 ⇒
+B35b 落地后 16 配对结果可信。
+
+注意：dry-run 生成的 B35_n16_pooled.json / T26_b35_n16.md 已删除，
+避免 n=8 数据被误读为 n=16。正式 n=16 产物只在 B35b 两文件到位后生成。
+
+判定（PREREG_B35 SC-B35-Midres(n=16)）：mean_d ≥ 2.0 且 p < 0.05。
+若过：论文 B §6 "directional at n=8 (p=0.055)" 改为显著结论（latex_B +
+md/zh 同步）；若不过：维持诚实披露（预注册已含失败处置路径）。
